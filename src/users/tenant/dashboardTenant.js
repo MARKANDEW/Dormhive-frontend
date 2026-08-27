@@ -18,6 +18,18 @@ const normalizePropertyImage = (property) => {
   const source = property.image_url || property.cover_image || (Array.isArray(property.images) && property.images[0]) || '';
   return resolveImageUrl(source);
 };
+const normalizePropertyImages = (property = {}) => {
+  let uploadedImages = property.images;
+  if (typeof uploadedImages === 'string') {
+    try { uploadedImages = JSON.parse(uploadedImages); } catch { uploadedImages = []; }
+  }
+  if (!Array.isArray(uploadedImages)) uploadedImages = [];
+  const images = (uploadedImages.length ? uploadedImages : [property.image_url, property.cover_image])
+    .filter(Boolean)
+    .map((image) => resolveImageUrl(image))
+    .filter(Boolean);
+  return [...new Set(images)];
+};
 const esc = (value = '') => {
   const node = document.createElement('span');
   node.textContent = value;
@@ -30,31 +42,45 @@ function tenantFullName(user = {}) {
   return combined || String(user.name ?? 'Tenant').trim() || 'Tenant';
 }
 const money = (value = 0) => `PHP ${Number(value || 0).toLocaleString('en-PH')}`;
-const glyph = { grid: '&#9638;', calendar: '&#9783;', gear: '&#9881;', menu: '&#9776;', search: '&#9906;', pin: '&#9679;', heart: '&#9825;', home: '&#8962;', walk: '&#10148;', target: '&#8857;', layers: '&#9638;', arrow: '&#8594;', wifi: '&#8976;', snow: '&#10052;', kitchen: '&#9832;', laundry: '&#8635;', car: '&#9670;' };
+const glyph = { grid: '&#9638;', calendar: '&#9783;', gear: '&#9881;', menu: '&#9776;', search: '&#9906;', pin: '&#9679;', heart: '&#9825;', heartFilled: '&#9829;', home: '&#8962;', walk: '&#10148;', target: '&#8857;', layers: '&#9638;', arrow: '&#8594;', wifi: '&#8976;', snow: '&#10052;', kitchen: '&#9832;', laundry: '&#8635;', car: '&#9670;' };
 const icon = (name) => `<span class="icon">${glyph[name] ?? ''}</span>`;
+const heartIcon = (filled = false) => `<span class="icon">${filled ? glyph.heartFilled : glyph.heart}</span>`;
 const formatNotificationDate = (value) => new Date(value ?? Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' });
 
 function loadStyle() {
+  const stylePromises = [];
+
   if (!document.querySelector('[data-tenant-style="dashboard"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = new URL('./style/dashboardTenant.css', import.meta.url);
     link.dataset.tenantStyle = 'dashboard';
     document.head.append(link);
+    stylePromises.push(new Promise((resolve) => {
+      link.addEventListener('load', resolve, { once: true });
+      link.addEventListener('error', resolve, { once: true });
+    }));
   }
+
   if (!document.querySelector('[data-tenant-style="dashboard-font"]')) {
     const style = document.createElement('style');
     style.dataset.tenantStyle = 'dashboard-font';
     style.textContent = '.dh-dashboard{font-family:Inter,ui-sans-serif,system-ui,sans-serif}.dh-dashboard .intro small,.dh-dashboard .intro h1,.dh-dashboard .intro p{color:#000}';
     document.head.append(style);
   }
+
   if (!document.querySelector('[data-tenant-style="amenities"]')) {
     const aLink = document.createElement('link');
     aLink.rel = 'stylesheet';
     aLink.href = new URL('./style/amenities.css', import.meta.url);
     aLink.dataset.tenantStyle = 'amenities';
     document.head.append(aLink);
+    stylePromises.push(new Promise((resolve) => {
+      aLink.addEventListener('load', resolve, { once: true });
+      aLink.addEventListener('error', resolve, { once: true });
+    }));
   }
+
   if (!document.querySelector('[data-tenant-style="notifications"]')) {
     const style = document.createElement('style');
     style.dataset.tenantStyle = 'notifications';
@@ -76,7 +102,28 @@ function loadStyle() {
     `;
     document.head.append(style);
   }
-  // Add CSS for full-map-container modal
+
+  if (!document.querySelector('[data-tenant-style="listing-carousel"]')) {
+    const style = document.createElement('style');
+    style.dataset.tenantStyle = 'listing-carousel';
+    style.textContent = `
+      .dh-dashboard .listing .photo { position: relative; }
+      .dh-dashboard .listing .listing-photo { cursor: zoom-in; }
+      .photo-only-modal { width: min(92vw, 1000px); max-height: 92vh; padding: 0; overflow: hidden; background: transparent; }
+      .photo-only-modal .ui-modal__header, .photo-only-modal .ui-modal__footer { display: none; }
+      .photo-only-modal .ui-modal__body { position: relative; display: grid; place-items: center; padding: 0; background: transparent; }
+      .photo-only-modal .listing-photo-viewer { display: block; width: 100%; max-height: 92vh; object-fit: contain; border-radius: .65rem; }
+      .photo-only-modal .photo-viewer-arrow { position: absolute; top: 50%; z-index: 1; width: 2.5rem; height: 2.5rem; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.9); color: #39574e; font-size: 1.7rem; line-height: 1; cursor: pointer; transform: translateY(-50%); }
+      .photo-only-modal .photo-viewer-arrow:hover { background: #fff; }
+      .photo-only-modal .photo-viewer-previous { left: .75rem; }
+      .photo-only-modal .photo-viewer-next { right: .75rem; }
+      .dh-dashboard .listing-carousel-dots { position: absolute; right: 0; bottom: .65rem; left: 0; z-index: 2; display: flex; justify-content: center; gap: .35rem; }
+      .dh-dashboard .listing-carousel-dots .listing-carousel-dot { position: static; top: auto; right: auto; width: .45rem; height: .45rem; padding: 0; border: 1px solid rgba(255,255,255,.95); border-radius: 50%; background: rgba(255,255,255,.7); box-shadow: 0 1px 3px rgba(0,0,0,.35); cursor: pointer; }
+      .dh-dashboard .listing-carousel-dot.is-active { background: #b48421; transform: scale(1.2); }
+    `;
+    document.head.append(style);
+  }
+
   if (!document.querySelector('style[data-tenant-modal-css]')) {
     const style = document.createElement('style');
     style.dataset.tenantModalCss = '1';
@@ -130,6 +177,8 @@ function loadStyle() {
     `;
     document.head.append(style);
   }
+
+  return Promise.all(stylePromises);
 }
 
 function session() {
@@ -176,6 +225,26 @@ function normalizeGenderPreference(value = '') {
   return labels[gender] ?? gender.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+const FAVORITES_KEY = 'dormhive.favoriteListings';
+
+function getFavoriteListingIds() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+    return Array.isArray(raw) ? raw.map((value) => String(value)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function toggleFavoriteListing(id) {
+  const list = getFavoriteListingIds();
+  const next = new Set(list);
+  const normalizedId = String(id);
+  if (next.has(normalizedId)) next.delete(normalizedId); else next.add(normalizedId);
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
+  return next.has(normalizedId);
+}
+
 const AMENITY_LABELS = {
   wifi: 'Wi-Fi',
   laundry: 'Laundry',
@@ -211,9 +280,15 @@ function propertyDetailsMarkup(property) {
   const address = [property.address, property.barangay, property.municipality].filter(Boolean).join(', ');
   const amenities = normalizeAmenities(property);
   const maxOccupants = Number(property.max_occupants);
+  const images = normalizePropertyImages(property);
+  const galleryImages = images.length ? images : [DEFAULT_IMAGE_PLACEHOLDER];
+  const galleryDots = galleryImages.length > 1 ? `<div class="property-detail-gallery-dots" role="tablist" aria-label="Property photos">${galleryImages.map((_, index) => `<button type="button" class="property-detail-gallery-dot${index === 0 ? ' is-active' : ''}" data-gallery-index="${index}" role="tab" aria-label="View photo ${index + 1}" aria-selected="${index === 0}"></button>`).join('')}</div>` : '';
   return `
     <div class="property-detail-modal-content">
-      <img class="property-detail-modal-image" src="${esc(normalizePropertyImage(property) || DEFAULT_IMAGE_PLACEHOLDER)}" alt="${esc(property.title || 'Property')}" />
+      <div class="property-detail-gallery" data-gallery-images='${esc(JSON.stringify(galleryImages))}'>
+        <img class="property-detail-modal-image" src="${esc(galleryImages[0])}" alt="${esc(property.title || 'Property')} photo 1" />
+        ${galleryDots}
+      </div>
       <div class="property-detail-modal-info">
         <div class="property-detail-modal-heading">
           <h3>${esc(property.title || 'Property')}</h3>
@@ -255,7 +330,11 @@ function loadPropertyDetailsStyle() {
   style.textContent = `
     .ui-modal:has(.property-detail-modal-content) { position: fixed; inset: 0; margin: auto; width: min(94vw, 920px); max-height: calc(100vh - 2rem); }
     .property-detail-modal-content { display: grid; grid-template-columns: minmax(220px, 38%) 1fr; gap: 1.25rem; }
-    .property-detail-modal-image { width: 100%; height: 230px; object-fit: cover; border-radius: .65rem; }
+    .property-detail-gallery { position: relative; align-self: start; width: 100%; height: 230px; min-width: 0; touch-action: pan-y; }
+    .property-detail-modal-image { display: block; width: 100%; height: 230px; object-fit: cover; border-radius: .65rem; }
+    .property-detail-gallery-dots { position: absolute; right: 0; bottom: .65rem; left: 0; display: flex; justify-content: center; gap: .35rem; }
+    .property-detail-gallery-dot { width: .45rem; height: .45rem; padding: 0; border: 1px solid rgba(255,255,255,.9); border-radius: 50%; background: rgba(255,255,255,.65); box-shadow: 0 1px 3px rgba(0,0,0,.35); cursor: pointer; }
+    .property-detail-gallery-dot.is-active { background: #b48421; transform: scale(1.2); }
     .property-detail-modal-heading { display: flex; justify-content: space-between; align-items: baseline; gap: .75rem; }
     .property-detail-modal-heading h3 { margin: 0; font-size: 1.35rem; }
     .property-detail-modal-heading strong { color: #9a6a24; white-space: nowrap; }
@@ -269,7 +348,7 @@ function loadPropertyDetailsStyle() {
     .dashboard-request-fields input { width: 100%; height: 42px; padding: 0 .65rem; border: 1px solid #d8d0c9; border-radius: .55rem; font: inherit; }
     .dashboard-request-fields button { height: 42px; padding: 0 .8rem; border: 0; border-radius: .55rem; background: #b48421; color: #fff; font-weight: 700; cursor: pointer; white-space: nowrap; }
     .dashboard-request-status { min-height: 1.2rem; margin: .55rem 0 0; color: #7b4b2d; font-size: .82rem; }
-    @media (max-width: 700px) { .property-detail-modal-content, .dashboard-request-fields { grid-template-columns: 1fr; } .property-detail-modal-image { height: 180px; } }
+    @media (max-width: 700px) { .property-detail-modal-content, .dashboard-request-fields { grid-template-columns: 1fr; } .property-detail-gallery { height: 180px; } .property-detail-modal-image { height: 180px; } }
   `;
   document.head.append(style);
 }
@@ -285,7 +364,7 @@ function listingCard(item, index) {
   const badge = item.status === 'approved' ? 'Verified' : (item.status || 'Active');
   const walkDistance = (0.6 + index * 0.25).toFixed(1);
   const image = normalizePropertyImage(item);
-  const photoMarkup = `<img src="${esc(image || DEFAULT_IMAGE_PLACEHOLDER)}" alt="${esc(item.title || 'Listing photo')}" class="listing-photo" /><em>${esc(badge)}</em><button aria-label="Save listing">${icon('heart')}</button>`;
+  const photoMarkup = `<img src="${esc(image || DEFAULT_IMAGE_PLACEHOLDER)}" alt="${esc(item.title || 'Listing photo')}" class="listing-photo" /><em>${esc(badge)}</em><button aria-label="Save listing">${heartIcon(false)}</button>`;
 
   return `
     <article class="listing" data-id="${item.id}">
@@ -497,7 +576,7 @@ async function showNearbyListingsModal(properties = []) {
 
 export async function renderDashboardTenant(root = document.querySelector('#app')) {
   if (!root) throw new Error('Tenant dashboard requires #app.');
-  loadStyle();
+  await loadStyle();
   loadPropertyDetailsStyle();
   ensureTenantSidebarStyles();
 
@@ -675,6 +754,9 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
   }, 15000);
 
   const state = { all: [] };
+  const routeSearch = typeof window.DORMHIVE_ROUTE_SEARCH === 'string' ? window.DORMHIVE_ROUTE_SEARCH : window.location.search;
+  const requestedPropertyId = new URLSearchParams(routeSearch).get('propertyId');
+  let requestedPropertyOpened = false;
   const search = root.querySelector('#search');
   const maxPrice = root.querySelector('#max-price');
   const range = root.querySelector('#range');
@@ -684,6 +766,28 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
   const applyButton = root.querySelector('#apply-filters');
   const mapStatus = root.querySelector('#map-status');
   const mapFrame = root.querySelector('#tenant-map');
+  const renderSkeletonState = () => {
+    if (!cards) return;
+    const skeleton = document.createElement('div');
+    skeleton.className = 'dh-dashboard-skeleton';
+    skeleton.innerHTML = `
+      <div class="dh-dashboard-skeleton-card">
+        <span class="ui-skeleton-line" style="width:38%;height:0.8rem"></span>
+        <span class="ui-skeleton-line" style="width:100%;height:10.5rem"></span>
+        <span class="ui-skeleton-line" style="width:100%;height:0.8rem"></span>
+        <span class="ui-skeleton-line" style="width:70%;height:0.8rem"></span>
+      </div>
+      <div class="dh-dashboard-skeleton-card">
+        <span class="ui-skeleton-line" style="width:38%;height:0.8rem"></span>
+        <span class="ui-skeleton-line" style="width:100%;height:10.5rem"></span>
+        <span class="ui-skeleton-line" style="width:100%;height:0.8rem"></span>
+        <span class="ui-skeleton-line" style="width:70%;height:0.8rem"></span>
+      </div>
+    `;
+    cards.innerHTML = '';
+    cards.appendChild(skeleton);
+    if (mapStatus) mapStatus.textContent = 'Loading nearby listings...';
+  };
 
   const updateRangeNote = () => {
     maxPrice.value = String(range.value || 15000);
@@ -723,6 +827,37 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
 
     const modal = createModal({ title: property.title || 'Property Details', content: '', closeLabel: 'Close' });
     modal.querySelector('.ui-modal__body').innerHTML = propertyDetailsMarkup(property);
+    const gallery = modal.querySelector('.property-detail-gallery');
+    if (gallery) {
+      const galleryImage = gallery.querySelector('.property-detail-modal-image');
+      const galleryDots = Array.from(gallery.querySelectorAll('.property-detail-gallery-dot'));
+      let galleryImages = [];
+      try { galleryImages = JSON.parse(gallery.dataset.galleryImages || '[]'); } catch {}
+      let galleryIndex = 0;
+      const showGalleryImage = (nextIndex) => {
+        if (!galleryImages.length) return;
+        galleryIndex = (nextIndex + galleryImages.length) % galleryImages.length;
+        galleryImage.src = galleryImages[galleryIndex];
+        galleryImage.alt = `${property.title || 'Property'} photo ${galleryIndex + 1}`;
+        galleryDots.forEach((dot, index) => {
+          const isActive = index === galleryIndex;
+          dot.classList.toggle('is-active', isActive);
+          dot.setAttribute('aria-selected', String(isActive));
+        });
+      };
+      galleryDots.forEach((dot) => dot.addEventListener('click', () => showGalleryImage(Number(dot.dataset.galleryIndex))));
+      let swipeStartX = null;
+      gallery.addEventListener('pointerdown', (event) => { swipeStartX = event.clientX; });
+      gallery.addEventListener('pointerup', (event) => {
+        if (swipeStartX === null || Math.abs(event.clientX - swipeStartX) < 35) {
+          swipeStartX = null;
+          return;
+        }
+        showGalleryImage(galleryIndex + (event.clientX < swipeStartX ? 1 : -1));
+        swipeStartX = null;
+      });
+      gallery.addEventListener('pointercancel', () => { swipeStartX = null; });
+    }
     const form = modal.querySelector('.dashboard-request-form');
     const status = modal.querySelector('.dashboard-request-status');
     const moveIn = form.querySelector('[name="moveInDate"]');
@@ -766,21 +901,28 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
       return;
     }
 
+    const favoriteIds = new Set(getFavoriteListingIds());
     cards.innerHTML = items.map((item, index) => {
       const location = locationText(item);
       const roomType = normalizeRoomType(item.room_type);
       const gender = normalizeGenderPreference(item.gender_preference);
       const maxOccupants = Number(item.max_occupants || 1);
-      const image = normalizePropertyImage(item) || DEFAULT_IMAGE_PLACEHOLDER;
+      const images = normalizePropertyImages(item);
+      const galleryImages = images.length ? images : [DEFAULT_IMAGE_PLACEHOLDER];
       const walkDistance = (0.6 + index * 0.25).toFixed(1);
       const amenitySummary = renderAmenitiesChips(item) || '<span class="empty-amenity">No amenities listed</span>';
+      const dots = galleryImages.length > 1
+        ? `<div class="listing-carousel-dots" role="tablist" aria-label="Photos for ${esc(item.title || 'listing')}">${galleryImages.map((_, photoIndex) => `<button type="button" class="listing-carousel-dot${photoIndex === 0 ? ' is-active' : ''}" data-carousel-index="${photoIndex}" role="tab" aria-label="View photo ${photoIndex + 1}" aria-selected="${photoIndex === 0}"></button>`).join('')}</div>`
+        : '';
+      const isFavorite = favoriteIds.has(String(item.id));
 
       return `
         <article class="listing" data-id="${item.id}">
           <div class="photo p${index % 4}">
-            <img src="${esc(image)}" alt="${esc(item.title || 'Listing photo')}" class="listing-photo" />
+            <img src="${esc(galleryImages[0])}" alt="${esc(item.title || 'Listing photo')}" class="listing-photo" />
             <em>${esc(item.status === 'approved' ? 'Verified' : (item.status || 'Approved'))}</em>
-            <button aria-label="Save listing">${icon('heart')}</button>
+            <button type="button" class="favorite-toggle${isFavorite ? ' is-favorited' : ''}" data-property-id="${item.id}" aria-label="${isFavorite ? 'Remove from favorites' : 'Save listing'}" aria-pressed="${isFavorite}">${heartIcon(isFavorite)}</button>
+            ${dots}
           </div>
           <div class="listing-body">
             <p class="place">${icon('pin')}${esc(location)}</p>
@@ -796,6 +938,81 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
         </article>
       `;
     }).join('');
+
+    cards.querySelectorAll('.listing-carousel-dots').forEach((dotsElement) => {
+      const gallery = dotsElement.closest('.photo');
+      const item = items.find((entry) => String(entry.id) === String(gallery.closest('.listing').dataset.id));
+      const images = normalizePropertyImages(item);
+      const galleryImages = images.length ? images : [DEFAULT_IMAGE_PLACEHOLDER];
+      const imageElement = gallery.querySelector('.listing-photo');
+      const dotButtons = Array.from(dotsElement.querySelectorAll('.listing-carousel-dot'));
+      let activeIndex = 0;
+      const showImage = (nextIndex) => {
+        activeIndex = (nextIndex + galleryImages.length) % galleryImages.length;
+        imageElement.src = galleryImages[activeIndex];
+        imageElement.alt = `${item.title || 'Listing photo'} photo ${activeIndex + 1}`;
+        dotButtons.forEach((dot, dotIndex) => {
+          const isActive = dotIndex === activeIndex;
+          dot.classList.toggle('is-active', isActive);
+          dot.setAttribute('aria-selected', String(isActive));
+        });
+      };
+      dotButtons.forEach((dot) => dot.addEventListener('click', (event) => {
+        event.stopPropagation();
+        showImage(Number(dot.dataset.carouselIndex));
+      }));
+    });
+
+    cards.querySelectorAll('.listing-photo').forEach((imageElement) => {
+      const openPhotoViewer = () => {
+        const property = state.all.find((item) => String(item.id) === String(imageElement.closest('.listing').dataset.id));
+        if (!property) return;
+        const clickedImage = imageElement.currentSrc || imageElement.src;
+        const galleryImages = normalizePropertyImages(property).length
+          ? normalizePropertyImages(property)
+          : [clickedImage];
+        const startingIndex = Math.max(0, galleryImages.findIndex((image) => image === clickedImage));
+        const viewer = createModal({
+          title: property.title || 'Property Photo',
+          content: `<img class="listing-photo-viewer" src="${esc(clickedImage)}" alt="${esc(property.title || 'Property')} photo ${startingIndex + 1}" />`,
+          closeLabel: 'Close'
+        });
+        viewer.classList.add('photo-only-modal');
+        const viewerBody = viewer.querySelector('.ui-modal__body');
+        viewerBody.insertAdjacentHTML('beforeend', '<button type="button" class="photo-viewer-arrow photo-viewer-previous" aria-label="Previous photo">&#8249;</button><button type="button" class="photo-viewer-arrow photo-viewer-next" aria-label="Next photo">&#8250;</button>');
+        const viewerImage = viewerBody.querySelector('.listing-photo-viewer');
+        let viewerIndex = startingIndex;
+        const showViewerImage = (nextIndex) => {
+          viewerIndex = (nextIndex + galleryImages.length) % galleryImages.length;
+          viewerImage.src = galleryImages[viewerIndex];
+          viewerImage.alt = `${property.title || 'Property'} photo ${viewerIndex + 1}`;
+        };
+        viewerBody.querySelector('.photo-viewer-previous').addEventListener('click', () => showViewerImage(viewerIndex - 1));
+        viewerBody.querySelector('.photo-viewer-next').addEventListener('click', () => showViewerImage(viewerIndex + 1));
+        openModal(viewer);
+      };
+      imageElement.addEventListener('click', openPhotoViewer);
+      imageElement.tabIndex = 0;
+      imageElement.setAttribute('role', 'button');
+      imageElement.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openPhotoViewer();
+        }
+      });
+    });
+
+    cards.querySelectorAll('.favorite-toggle').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const propertyId = button.dataset.propertyId;
+        const isFavorite = toggleFavoriteListing(propertyId);
+        button.classList.toggle('is-favorited', isFavorite);
+        button.innerHTML = heartIcon(isFavorite);
+        button.setAttribute('aria-pressed', String(isFavorite));
+        button.setAttribute('aria-label', isFavorite ? 'Remove from favorites' : 'Save listing');
+      });
+    });
 
     cards.querySelectorAll('.view-details').forEach((button) => {
       button.addEventListener('click', () => {
@@ -870,7 +1087,15 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
     });
   }
 
+  root.addEventListener('click', (event) => {
+    const detailsButton = event.target.closest('.map-property-details');
+    if (!detailsButton || !root.contains(detailsButton)) return;
+    const property = state.all.find((item) => String(item.id) === String(detailsButton.dataset.propertyId));
+    if (property) openPropertyDetails(property);
+  });
+
   const load = async () => {
+    renderSkeletonState();
     try {
       // Only load approved properties for tenants (Featured Listings and map markers)
       const response = await api('/properties?limit=100&status=approved');
@@ -879,6 +1104,13 @@ export async function renderDashboardTenant(root = document.querySelector('#app'
       // Initialize Leaflet map and render approved property markers
       await initLeafletMap(root.querySelector('.map'), state.all);
       renderCards();
+      if (requestedPropertyId && !requestedPropertyOpened) {
+        const requestedProperty = state.all.find((item) => String(item.id) === String(requestedPropertyId));
+        if (requestedProperty) {
+          requestedPropertyOpened = true;
+          await openPropertyDetails(requestedProperty);
+        }
+      }
     } catch (error) {
       cards.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
       if (mapStatus) mapStatus.textContent = 'Unable to load validated listings from the database.';
