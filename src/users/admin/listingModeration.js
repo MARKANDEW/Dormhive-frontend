@@ -1,5 +1,6 @@
 import { ensureAdminSidebarStyles, renderAdminSidebar } from './sidebarAdmin.js';
 import { applyAdminPrivacy } from './privacy.js';
+import { showToast } from '../../components/toast.js';
 
 const API = window.DORMHIVE_API_URL ?? 'http://localhost:5000/api/v1';
 const headers = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('dormhive.accessToken') ?? ''}` });
@@ -29,7 +30,6 @@ export function renderListingModeration(root = document.querySelector('#app')) {
             <div>
               <h1>Listing Moderation: Pending Approvals</h1>
             </div>
-            <a class="header-link" href="#/admin/dashboardAdmin">← Overview</a>
           </header>
 
           <section class="moderation-content">
@@ -39,18 +39,13 @@ export function renderListingModeration(root = document.querySelector('#app')) {
                 <input id="moderation-search" type="search" placeholder="Search" />
               </label>
               <label class="filter-field">
-                <span>Filter by Type</span>
                 <select id="moderation-filter">
                   <option value="all">All Types</option>
-                  <option value="Bed Space">Bed Space</option>
-                  <option value="Studio Unit BGC">Studio Unit BGC</option>
-                  <option value="Solo Room">Solo Room</option>
-                  <option value="Dormitory">Dormitory</option>
-                  <option value="Private Room">Private Room</option>
-                  <option value="Apartment">Apartment</option>
+                  <option value="bedspace">Bedspace</option>
+                  <option value="private_room">Solo Room</option>
+                  <option value="entire_unit">Studio Unit</option>
                 </select>
               </label>
-              <button class="bulk-actions" type="button">Bulk Actions</button>
             </div>
             <div class="moderation-tabs" role="tablist">
               <button type="button" class="moderation-tab active" data-status="pending">Pending Approvals</button>
@@ -76,11 +71,6 @@ export function renderListingModeration(root = document.querySelector('#app')) {
                   </thead>
                   <tbody id="moderation-rows"></tbody>
                 </table>
-                <div class="pagination">
-                  <button type="button">‹</button>
-                  <button type="button" class="active">1</button>
-                  <button type="button">›</button>
-                </div>
               </section>
 
               <aside id="detail-panel" class="detail-panel">
@@ -191,9 +181,18 @@ export function renderListingModeration(root = document.querySelector('#app')) {
     return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
   };
 
+  const getPropertyImages = (row = {}) => {
+    let images = row.images;
+    if (typeof images === 'string') {
+      try { images = JSON.parse(images); } catch { images = []; }
+    }
+    const sources = [row.image_url, ...(Array.isArray(images) ? images : [])].filter(Boolean);
+    return [...new Set(sources.map(resolveImageUrl).filter(Boolean))];
+  };
+
   const getThumbStyles = (row) => {
     const image = resolveImageUrl(row.image_url);
-    return image ? `style="background-image:url('${image}')"` : '';
+    return image ? `style="background-image:url('${image}');background-position:center;background-size:cover;background-repeat:no-repeat"` : '';
   };
 
   const formatCurrency = (value = 0) => `₱${Number(value ?? 0).toLocaleString()}`;
@@ -251,10 +250,9 @@ export function renderListingModeration(root = document.querySelector('#app')) {
       <p data-privacy-mask="stat">Rent: ${esc(formatCurrency(row.monthly_rent))}</p>
       <p>Submitted: ${esc(formatDate(row.created_at))}</p>`;
     applyAdminPrivacy(root);
-    const imageUrl = resolveImageUrl(row.image_url);
-    detailPhotos.innerHTML = imageUrl
-      ? `<div class="thumb" style="background-image:url('${imageUrl}')"></div>` + Array.from({ length: 5 }, () => '<div class="thumb"></div>').join('')
-      : Array.from({ length: 6 }, () => '<div class="thumb"></div>').join('');
+    const imageUrls = getPropertyImages(row);
+    const photoTiles = imageUrls.map((imageUrl) => `<div class="thumb" style="background-image:url('${esc(imageUrl)}');background-position:center;background-size:cover;background-repeat:no-repeat"></div>`);
+    detailPhotos.innerHTML = photoTiles.length ? photoTiles.join('') : '<div class="thumb"></div>';
     updateDetailActions();
   };
 
@@ -363,6 +361,7 @@ export function renderListingModeration(root = document.querySelector('#app')) {
 
       renderRows();
       statusLabel.textContent = `Listing ${status} successfully.`;
+      showToast({ message: `Listing ${status} successfully.`, type: 'success' });
       approveButton.disabled = rejectButton.disabled = false;
     } catch (error) {
       statusLabel.textContent = error.message;
@@ -411,6 +410,19 @@ export function renderListingModeration(root = document.querySelector('#app')) {
 
   const closeModal = () => modal.setAttribute('hidden', '');
 
+  const openPhotoPreview = (imageUrl) => {
+    const preview = document.createElement('div');
+    preview.className = 'photo-preview-modal';
+    preview.innerHTML = '<button type="button" class="photo-preview-close" aria-label="Close photo">×</button><img alt="Property photo preview">';
+    preview.querySelector('img').src = imageUrl;
+    const closePreview = () => preview.remove();
+    preview.querySelector('.photo-preview-close').addEventListener('click', closePreview);
+    preview.addEventListener('click', (event) => {
+      if (event.target === preview) closePreview();
+    });
+    document.body.append(preview);
+  };
+
   tabs.forEach((button) => {
     button.addEventListener('click', () => setActiveTab(button.dataset.status));
   });
@@ -424,6 +436,12 @@ export function renderListingModeration(root = document.querySelector('#app')) {
   modalClose?.addEventListener('click', closeModal);
   modal?.addEventListener('click', (event) => {
     if (event.target === modal) closeModal();
+  });
+  detailPhotos.addEventListener('click', (event) => {
+    const tile = event.target.closest('.thumb[style*="background-image"]');
+    if (!tile) return;
+    const match = tile.style.backgroundImage.match(/url\(["']?(.*?)["']?\)/);
+    if (match?.[1]) openPhotoPreview(match[1]);
   });
 
   searchInput.addEventListener('input', renderRows);

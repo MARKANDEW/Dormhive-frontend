@@ -2,9 +2,9 @@ const glyphs = {
   dashboardOwner: '▣',
   myListing: '⌂',
   inquiries: '✉',
-  activeTenant: '👥',
+  activeTenant: '<i class="bi bi-people" aria-hidden="true"></i>',
   analytics: '◔',
-  message: '💬',
+  message: '<i class="bi bi-chat-fill" aria-hidden="true"></i>',
   setting: '⚙'
 };
 
@@ -116,17 +116,44 @@ export async function getListingCounts() {
 // Update sidebar listing counts in the DOM
 export async function updateListingCountsInSidebar() {
   try {
-    const counts = await getListingCounts();
+    const [counts, bookingResponse] = await Promise.all([
+      getListingCounts(),
+      fetch(`${getAPI()}/bookings`, { headers: getAuthHeaders() })
+    ]);
     const myListingLink = document.querySelector('.owner-sidebar .nav-item[href="#/owner/myListing"] .nav-copy small');
     if (myListingLink) {
       myListingLink.textContent = `${counts.active} Active · ${counts.pending} Pending`;
     }
+
+    const bookingBody = await bookingResponse.json();
+    const user = getCurrentUser();
+    const activeTenants = bookingResponse.ok && Array.isArray(bookingBody.data)
+      ? bookingBody.data.filter((booking) => Number(booking.owner_id) === Number(user.id) && String(booking.status).toLowerCase() === 'approved').length
+      : 0;
+    const ownerBookings = bookingResponse.ok && Array.isArray(bookingBody.data)
+      ? bookingBody.data.filter((booking) => Number(booking.owner_id) === Number(user.id))
+      : [];
+    const inquiryBookings = ownerBookings.filter((booking) => String(booking.status).toLowerCase() !== 'approved');
+    const newInquiries = inquiryBookings.filter((booking) => String(booking.status).toLowerCase() === 'pending').length;
+    const activeTenantLink = document.querySelector('.owner-sidebar .nav-item[href="#/owner/activeTenant"] .nav-copy small');
+    if (activeTenantLink) activeTenantLink.textContent = String(activeTenants);
+    const inquiryLink = document.querySelector('.owner-sidebar .nav-item[href="#/owner/inquiries"] .nav-copy small');
+    if (inquiryLink) inquiryLink.textContent = `${newInquiries} New · ${inquiryBookings.length} Total`;
+
+    const conversationResponse = await fetch(`${getAPI()}/messages/conversations`, { headers: getAuthHeaders() });
+    const conversationBody = await conversationResponse.json();
+    const unreadMessages = conversationResponse.ok && Array.isArray(conversationBody.data)
+      ? conversationBody.data.reduce((total, conversation) => total + Number(conversation.unread_count ?? 0), 0)
+      : 0;
+    const messageLink = document.querySelector('.owner-sidebar .nav-item[href="#/owner/message"] .nav-copy small');
+    if (messageLink) messageLink.textContent = `${unreadMessages} Unread`;
   } catch (error) {
-    console.error('Error updating listing counts in sidebar:', error);
+    console.error('Error updating owner sidebar counts:', error);
   }
 }
   
 export function ensureOwnerSidebarStyles() {
+  document.querySelectorAll('link[data-dormhive-auth="split"]').forEach((node) => node.remove());
   if (document.querySelector('[data-owner-sidebar-style="shared"]')) return;
   const link = document.createElement('link');
   link.rel = 'stylesheet';
@@ -143,6 +170,7 @@ export function renderOwnerSidebar(active = 'dashboardOwner') {
     </a>
     <div class="owner-sidebar-rule" aria-hidden="true"></div>
     ${sidebarLinks.map(([page, label, countA, countB]) => `<a class="nav-item ${active === page ? 'active' : ''}" href="#/owner/${page}"><span class="nav-icon">${glyphs[page] ?? ''}</span><span class="nav-copy"><strong>${label}</strong>${countA || countB ? `<small>${[countA, countB].filter(Boolean).join(' · ')}</small>` : ''}</span></a>`).join('')}
+    <div class="owner-support-notice"><strong>Need help?</strong><span>Our support team is here.</span><a href="#/owner/support">Contact support</a></div>
     <button class="logout">Sign out</button>
   </aside>`;
 }

@@ -24,6 +24,11 @@
   flex-direction: column;
   gap: 0.35rem;
   box-sizing: border-box;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.owner-shell > .owner-sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 .owner-shell .owner-brand {
@@ -110,6 +115,32 @@
   font-size: 0.72rem;
   opacity: 0.78;
 }
+.owner-support-notice {
+  display: grid;
+  gap: 5px;
+  margin: auto 0 0;
+  padding: 14px 12px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 12px;
+  background: rgb(8 104 88 / 42%);
+}
+.owner-support-notice strong {
+  color: #fff;
+  font-size: 13px;
+}
+.owner-support-notice span {
+  color: #c5ddd5;
+  font-size: 11px;
+}
+.owner-support-notice a {
+  color: #daa520;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.owner-support-notice a:hover {
+  color: #f0c34e;
+}
 
 .owner-shell .owner-sidebar .nav-icon {
   width: 1.5rem;
@@ -163,6 +194,11 @@
   flex-direction: column !important;
   gap: 0.35rem !important;
   box-sizing: border-box !important;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+
+.owner-shell > .owner-sidebar * {
+  font-family: inherit !important;
 }
 
 .owner-shell > .owner-sidebar .nav-item {
@@ -188,4 +224,46 @@
   background: transparent !important;
   color: #fff !important;
   cursor: pointer !important;
+}
+
+@media (max-height: 700px) and (min-width: 861px) {
+  .owner-shell > .owner-sidebar {
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+    gap: 2px !important;
+  }
+  .owner-shell .owner-brand {
+    margin-bottom: 4px;
+  }
+  .owner-shell .owner-brand-mark {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+  .owner-shell .owner-brand-icon {
+    width: 19px;
+    height: 19px;
+  }
+  .owner-shell .owner-brand strong {
+    font-size: 18px;
+  }
+  .owner-shell .owner-brand small {
+    margin-top: 2px;
+    font-size: 12px;
+  }
+  .owner-shell .owner-sidebar-rule {
+    margin-bottom: 3px;
+  }
+  .owner-shell > .owner-sidebar .nav-item {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+  .owner-support-notice {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+  .owner-shell > .owner-sidebar .logout {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
 }

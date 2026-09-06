@@ -182,7 +182,9 @@ form {
 }
 
 .forgot-link {
-  margin: -15px 0 15px;
+  width: 100%;
+  margin: 1px 0 15px;
+  text-align: center;
 }
 .forgot-link a {
   font-size: 14.5px;
@@ -245,7 +247,7 @@ form {
 
 .form-box.register .auth-submit {
   margin-top: 16px;
-  background: linear-gradient(to right, #daa520 0%, #645403 100%);
+  background: linear-gradient(to right, #645403 0%, #daa520 100%);
 }
 
 .form-box.login .auth-submit {
@@ -372,10 +374,15 @@ form {
 }
 
 .form-inner .input-box {
+  width: 100%;
   margin: 14px 0;
 }
 .form-inner .btn {
   width: 100%;
+}
+.form-inner .forgot-link {
+  width: 100%;
+  text-align: center;
 }
 
 @media screen and (max-width: 650px) {

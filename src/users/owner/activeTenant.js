@@ -18,6 +18,13 @@ const resolveAvatarUrl = (value = '') => {
   return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
 };
 
+function renderTenantAvatar(entry) {
+  const name = entry.tenant_name || 'Tenant';
+  const source = resolveAvatarUrl(entry.tenant_avatar_url || entry.avatar_url || entry.tenant_avatar || '');
+  if (!source) return `<span class="tenant-avatar-fallback">${esc(initials(name))}</span>`;
+  return `<img src="${esc(source)}" alt="${esc(name)} profile" onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';"><span class="tenant-avatar-fallback" style="display:none;">${esc(initials(name))}</span>`;
+}
+
 function css() {
   document.querySelectorAll('[data-owner-style="tenants"]').forEach((node) => node.remove());
   const existing = document.querySelector('[data-owner-style="tenants"]');
@@ -32,14 +39,14 @@ function css() {
 
 function tenantStatus(entry) {
   const status = String(entry.status || 'approved').toLowerCase();
-  if (status === 'approved') return { label: 'Paid', className: 'status-paid' };
+  if (status === 'approved') return { label: 'Active', className: 'status-paid' };
   if (status === 'pending') return { label: 'Partial', className: 'status-partial' };
   return { label: 'Overdue', className: 'status-overdue' };
 }
 
 function isActiveTenant(entry) {
   const status = String(entry?.status ?? '').toLowerCase();
-  return status === 'approved' || status === 'pending';
+  return status === 'approved';
 }
 
 function unitLabel(entry) {
@@ -118,6 +125,7 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
   const searchInput = root.querySelector('#tenant-search');
   const countBadge = root.querySelector('#tenant-count');
   let allRows = [];
+  let isLoading = false;
 
   const renderRows = (query = '') => {
     const term = query.trim().toLowerCase();
@@ -132,7 +140,7 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
         <tr data-booking-id="${esc(String(entry.id ?? ''))}">
           <td>
             <div class="tenant-cell">
-              <span class="tenant-avatar">${esc(initials(entry.tenant_name || 'Tenant'))}</span>
+                        <span class="tenant-avatar">${renderTenantAvatar(entry)}</span>
               <span>${esc(entry.tenant_name || 'Tenant')}</span>
             </div>
           </td>
@@ -143,7 +151,6 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
             <div class="action-group">
               <button type="button" data-action="message" data-booking-id="${esc(String(entry.id ?? ''))}">Message</button>
               <button type="button" data-action="lease" data-booking-id="${esc(String(entry.id ?? ''))}">View Lease</button>
-              <button type="button" data-action="payments" data-booking-id="${esc(String(entry.id ?? ''))}">Payment History</button>
             </div>
           </td>
         </tr>`;
@@ -204,8 +211,11 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
     openModal(paymentModal);
   });
 
-  fetch(`${API}/bookings`, { headers: auth() })
-    .then(async (r) => {
+  const loadTenants = async () => {
+    if (isLoading || !root.isConnected) return;
+    isLoading = true;
+    try {
+      const r = await fetch(`${API}/bookings`, { headers: auth() });
       const b = await r.json();
       if (!r.ok) throw new Error(b.message ?? 'Unable to load active tenants.');
       allRows = Array.isArray(b.data)
@@ -217,10 +227,17 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
       const loadingCell = tbody.querySelector('.status');
       if (loadingCell) loadingCell.remove();
       await updateListingCountsInSidebar();
-    })
-    .catch((error) => {
+    } catch (error) {
       tbody.innerHTML = `<tr><td colspan="5" class="empty">${esc(error.message)}</td></tr>`;
-    });
+    } finally {
+      isLoading = false;
+    }
+  };
+
+  loadTenants();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadTenants();
+  });
 
   searchInput?.addEventListener('input', (event) => renderRows(event.target.value));
 
