@@ -1,4 +1,5 @@
 const icons = {
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   grid: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
   chat: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H9l-5 4v-14.5Z"/>',
   calendar: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>',
@@ -31,7 +32,9 @@ export function renderTenantSidebar(activePage = 'dashboardTenant') {
     ['setting', 'Settings', 'gear']
   ];
 
-  return `<aside class="dh-sidebar">
+  return `<button type="button" class="tenant-mobile-menu" aria-label="Open tenant menu" aria-expanded="false">${icon('menu')}</button>
+  <button type="button" class="tenant-nav-backdrop" aria-label="Close tenant menu"></button>
+  <aside class="dh-sidebar">
     <a class="dh-logo" href="#/tenant/dashboardTenant">
       <b aria-hidden="true">${icon('brand')}</b>
       <span><strong>DormHive</strong><small>Tenant Portal</small></span>
@@ -48,10 +51,28 @@ export function renderTenantSidebar(activePage = 'dashboardTenant') {
 }
 
 document.addEventListener('click', (event) => {
+  const menuButton = event.target.closest('.tenant-mobile-menu');
+  if (menuButton) {
+    const app = menuButton.closest('.dh-app');
+    const isOpen = app?.classList.toggle('open');
+    menuButton.setAttribute('aria-expanded', String(Boolean(isOpen)));
+    return;
+  }
+
+  const backdrop = event.target.closest('.tenant-nav-backdrop');
+  if (backdrop) {
+    const app = backdrop.closest('.dh-app');
+    app?.classList.remove('open');
+    app?.querySelector('.tenant-mobile-menu')?.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
   const link = event.target.closest('.dh-sidebar a[href^="#/tenant/"]');
   if (!link) return;
   event.preventDefault();
   event.stopPropagation();
+  link.closest('.dh-app')?.classList.remove('open');
+  link.closest('.dh-app')?.querySelector('.tenant-mobile-menu')?.setAttribute('aria-expanded', 'false');
   const target = link.getAttribute('href');
   if (window.location.hash === target) {
     window.dispatchEvent(new Event('hashchange'));

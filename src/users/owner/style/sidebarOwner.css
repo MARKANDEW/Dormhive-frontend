@@ -33,6 +33,11 @@
     inset -10px 0 18px -18px rgba(22, 48, 71, 0.28),
     8px 0 24px rgba(22, 48, 71, 0.035);
 }
+
+.owner-mobile-menu,
+.owner-nav-backdrop {
+  display: none;
+}
 .owner-shell > .owner-sidebar:hover,
 .owner-shell > .owner-sidebar:focus-within {
   width: 248px;
@@ -286,6 +291,40 @@
   .owner-shell.nav-open > .owner-sidebar {
     transform: none;
   }
+
+  .owner-mobile-menu {
+    position: fixed;
+    top: 0.85rem;
+    left: 0.85rem;
+    z-index: 12;
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border: 1px solid #d5dee4;
+    border-radius: 0.7rem;
+    background: #fff;
+    color: #17344f;
+    box-shadow: 0 5px 16px rgba(22, 48, 71, 0.12);
+    font-size: 1.35rem;
+  }
+
+  .owner-shell--dashboard .owner-mobile-menu {
+    display: none;
+  }
+
+  .owner-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    display: none;
+    border: 0;
+    background: rgba(23, 52, 79, 0.28);
+  }
+
+  .owner-shell.nav-open .owner-nav-backdrop {
+    display: block;
+  }
 }
 
 /* High-specificity overrides to ensure this file is the single source of truth
@@ -386,6 +425,10 @@
 
 @media (max-width: 980px) {
   .owner-shell > .owner-sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
     width: 248px !important;
     transform: translateX(-105%) !important;
     transition: transform 0.2s ease !important;

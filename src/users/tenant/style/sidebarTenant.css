@@ -34,6 +34,11 @@
     8px 0 24px rgba(22, 48, 71, 0.035);
 }
 
+.tenant-mobile-menu,
+.tenant-nav-backdrop {
+  display: none;
+}
+
 .dh-sidebar:hover,
 .dh-sidebar:focus-within {
   width: 248px;
@@ -289,9 +294,52 @@
     overflow: visible;
   }
   .dh-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10;
     width: 248px;
+    height: 100vh;
     transform: translateX(-103%);
     transition: 0.2s;
+  }
+
+  .tenant-mobile-menu {
+    position: fixed;
+    top: 0.85rem;
+    left: 0.85rem;
+    z-index: 12;
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border: 1px solid #d5dee4;
+    border-radius: 0.7rem;
+    background: #fff;
+    color: #17344f;
+    box-shadow: 0 5px 16px rgba(22, 48, 71, 0.12);
+  }
+
+  .dh-dashboard .tenant-mobile-menu {
+    display: none;
+  }
+
+  .tenant-mobile-menu .icon {
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+
+  .tenant-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    display: none;
+    border: 0;
+    background: rgba(23, 52, 79, 0.28);
+  }
+
+  .dh-app.open .tenant-nav-backdrop {
+    display: block;
   }
   .dh-sidebar:hover,
   .dh-sidebar:focus-within {
