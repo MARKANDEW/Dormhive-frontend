@@ -36,7 +36,7 @@ export function renderAdminSidebar(active = 'dashboardAdmin') {
   return `
     <aside class="admin-nav">
       <a class="admin-logo" href="#/admin/dashboardAdmin">
-        <b class="admin-logo-mark" aria-hidden="true"><svg class="admin-logo-icon" viewBox="0 0 24 24"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9Z"/><path d="M9 20v-6h6v6"/></svg></b>
+        <b class="admin-logo-mark" aria-hidden="true"><svg class="admin-logo-icon" viewBox="0 0 24 24"><path d="m12 3 7.8 4.5v9L12 21l-7.8-4.5v-9L12 3Z"/><path d="m8 10 4-2.3 4 2.3v6.2H8V10Z"/><path d="M10.5 16.2v-3.5h3v3.5M8.2 10.2h7.6"/></svg></b>
         <span><strong>DormHive</strong><small>Admin Portal</small></span>
       </a>
       ${sidebarLinks.map(([page, label]) => `
