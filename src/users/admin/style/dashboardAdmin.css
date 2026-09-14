@@ -359,6 +359,7 @@ body {
 }
 
 .user-name {
+  overflow-wrap: anywhere;
   color: var(--overview-text);
   font-size: 1.05rem;
   font-weight: 700;
@@ -366,6 +367,7 @@ body {
 }
 
 .user-meta {
+  overflow-wrap: anywhere;
   color: var(--overview-muted);
   font-size: 12px;
   line-height: 1.5;
