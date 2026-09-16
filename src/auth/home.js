@@ -1,3 +1,5 @@
+import { createSkeleton } from '../components/loading.js';
+
 function removeAuthStyles() {
   document.querySelectorAll('link[data-dormhive-auth]').forEach((link) => link.remove());
 }
@@ -13,11 +15,21 @@ function loadStylesheet() {
   document.head.appendChild(link);
 }
 
-export function renderHomePage(root = document.querySelector('#app')) {
+export async function renderHomePage(root = document.querySelector('#app')) {
   if (!root) throw new Error('Home page requires #app');
 
   removeAuthStyles();
   loadStylesheet();
+
+  root.replaceChildren(
+    createSkeleton({
+      label: 'Loading home page',
+      rows: 6,
+      className: 'dh-home-skeleton',
+    })
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 350));
 
   root.innerHTML = `
     <div class="dh-home">
