@@ -1,5 +1,6 @@
 import { createModal, openModal } from '../../components/modal.js';
-import { ensureOwnerSidebarStyles, renderOwnerProfileCard, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { ensureOwnerSidebarStyles, loadOwnerStylesheet, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { withMediaAccessToken } from '../../services/mediaAccess.js';
 
 const API = window.DORMHIVE_API_URL ?? 'http://localhost:5000/api/v1';
 const apiBase = API.replace(/\/api\/v1\/?$/, '');
@@ -15,39 +16,46 @@ const resolveAvatarUrl = (value = '') => {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
   if (/^https?:\/\//i.test(url)) return url;
-  return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+  return withMediaAccessToken(`${apiBase}${url.startsWith('/') ? '' : '/'}${url}`);
 };
 
+function renderTenantAvatar(entry) {
+  const name = entry.tenant_name || 'Tenant';
+  const source = resolveAvatarUrl(entry.tenant_avatar_url || entry.avatar_url || entry.tenant_avatar || '');
+  if (!source) return `<span class="tenant-avatar-fallback">${esc(initials(name))}</span>`;
+  return `<img src="${esc(source)}" alt="${esc(name)} profile" onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';"><span class="tenant-avatar-fallback" style="display:none;">${esc(initials(name))}</span>`;
+}
+
 function css() {
-  document.querySelectorAll('[data-owner-style="tenants"]').forEach((node) => node.remove());
-  const existing = document.querySelector('[data-owner-style="tenants"]');
-  if (!existing) {
-    const l = document.createElement('link');
-    l.rel = 'stylesheet';
-    l.href = new URL('./style/activeTenant.css', import.meta.url);
-    l.dataset.ownerStyle = 'tenants';
-    document.head.append(l);
-  }
+  const stylesheet = new URL('./style/activeTenant.css', import.meta.url);
+  stylesheet.searchParams.set('v', 'mobile-tenant-empty-row-width-3');
+  return loadOwnerStylesheet('tenants', stylesheet);
 }
 
 function tenantStatus(entry) {
   const status = String(entry.status || 'approved').toLowerCase();
-  if (status === 'approved') return { label: 'Paid', className: 'status-paid' };
+  if (status === 'approved') return { label: 'Active', className: 'status-paid' };
   if (status === 'pending') return { label: 'Partial', className: 'status-partial' };
   return { label: 'Overdue', className: 'status-overdue' };
 }
 
 function isActiveTenant(entry) {
   const status = String(entry?.status ?? '').toLowerCase();
-  return status === 'approved' || status === 'pending';
+  return status === 'approved';
 }
 
 function unitLabel(entry) {
   return entry.unit || entry.property_title || 'Unit Unassigned';
 }
 
+function unitNumber(entry) {
+  const unit = entry.unit || entry.unit_number || entry.room_number || entry.unit_name || '';
+  return unit && unit !== entry.property_title ? unit : '—';
+}
+
 function formatLeaseEnd(entry) {
-  const raw = entry.move_out_date ?? entry.move_in_date ?? null;
+  if (entry.is_indefinite_move_out === true || Number(entry.is_indefinite_move_out) === 1) return 'Indefinite';
+  const raw = entry.move_out_date ?? null;
   if (!raw) return '—';
   const date = new Date(raw); if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
@@ -59,34 +67,18 @@ function normalizeTenantEntry(entry = {}) {
     ...entry,
     tenant_name: tenantName,
     property_title: entry.property_title || entry.title || 'Property',
-    unit: entry.unit || entry.property_title || 'Unit Unassigned'
+    unit: entry.unit || entry.unit_number || entry.room_number || entry.unit_name || ''
   };
 }
 
-export function renderActiveTenant(root = document.querySelector('#app')) {
+export async function renderActiveTenant(root = document.querySelector('#app')) {
   if (!root) throw new Error('Active tenants page requires #app.');
-  root.replaceChildren();
-  css();
-  ensureOwnerSidebarStyles();
-  const user = session();
-  const profileName = user.name || 'Mr. Reyes';
-  const profileRole = user.role === 'owner' ? 'Property Owner' : 'Tenant';
+  await Promise.all([css(), ensureOwnerSidebarStyles()]);
 
   root.innerHTML = `
     <div class="owner-shell">
       ${renderOwnerSidebar('activeTenant')}
       <div class="owner-main">
-        <header class="owner-topbar">
-          <div class="topbar-left"></div>
-          <label class="search-bar" aria-label="Global search">
-            <span>⌕</span>
-            <input type="search" placeholder="Global Search" />
-          </label>
-          <div class="topbar-right">
-            ${renderOwnerProfileCard()}
-          </div>
-        </header>
-
         <main class="tenants-page">
           <section class="page-head">
             <div>
@@ -94,8 +86,11 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
               <h1>Active Tenants</h1>
             </div>
             <article class="summary-card">
-              <span>Total Active Tenants</span>
-              <strong id="tenant-count">0</strong>
+              <span class="summary-icon" aria-hidden="true"><i class="bi bi-people"></i></span>
+              <div class="summary-copy">
+                <span class="summary-label">Total Active Tenants</span>
+                <strong id="tenant-count">0</strong>
+              </div>
             </article>
           </section>
 
@@ -128,10 +123,15 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
       </div>
     </div>`;
 
+  const menuButton = root.querySelector('.owner-mobile-menu');
+  const pageHead = root.querySelector('.tenants-page .page-head');
+  if (menuButton && pageHead) pageHead.prepend(menuButton);
+
   const tbody = root.querySelector('.tenant-table-body');
   const searchInput = root.querySelector('#tenant-search');
   const countBadge = root.querySelector('#tenant-count');
   let allRows = [];
+  let isLoading = false;
 
   const renderRows = (query = '') => {
     const term = query.trim().toLowerCase();
@@ -144,24 +144,39 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
       const { label, className } = tenantStatus(entry);
       return `
         <tr data-booking-id="${esc(String(entry.id ?? ''))}">
-          <td>
+          <td class="tenant-name-cell">
             <div class="tenant-cell">
-              <span class="tenant-avatar">${esc(initials(entry.tenant_name || 'Tenant'))}</span>
-              <span>${esc(entry.tenant_name || 'Tenant')}</span>
+              <span class="tenant-avatar">${renderTenantAvatar(entry)}</span>
+              <span class="tenant-name-copy">
+                <strong>${esc(entry.tenant_name || 'Tenant')}</strong>
+                <span class="mobile-status status-pill ${className}">${esc(label)}</span>
+              </span>
             </div>
           </td>
-          <td>${esc(unitLabel(entry))}</td>
-          <td><span class="status-pill ${className}">${esc(label)}</span></td>
-          <td>${esc(formatLeaseEnd(entry))}</td>
-          <td>
+          <td class="tenant-property-cell">
+            <span class="desktop-data-value">${esc(unitLabel(entry))}</span>
+            <span class="mobile-field">
+              <span class="mobile-data-label"><i class="bi bi-house-door" aria-hidden="true"></i> Property</span>
+              <span class="mobile-data-value">${esc(entry.property_title || 'Property')}</span>
+            </span>
+            <span class="mobile-field">
+              <span class="mobile-data-label"><i class="bi bi-door-closed" aria-hidden="true"></i> Unit</span>
+              <span class="mobile-data-value">${esc(unitNumber(entry))}</span>
+            </span>
+          </td>
+          <td class="tenant-status-cell"><span class="status-pill ${className}">${esc(label)}</span></td>
+          <td class="tenant-lease-cell">
+            <span class="mobile-data-label"><i class="bi bi-calendar3" aria-hidden="true"></i> Lease End Date</span>
+            <span class="mobile-data-value">${esc(formatLeaseEnd(entry))}</span>
+          </td>
+          <td class="tenant-actions-cell">
             <div class="action-group">
-              <button type="button" data-action="message" data-booking-id="${esc(String(entry.id ?? ''))}">Message</button>
-              <button type="button" data-action="lease" data-booking-id="${esc(String(entry.id ?? ''))}">View Lease</button>
-              <button type="button" data-action="payments" data-booking-id="${esc(String(entry.id ?? ''))}">Payment History</button>
+              <button type="button" data-action="message" data-booking-id="${esc(String(entry.id ?? ''))}"><i class="bi bi-chat-dots mobile-action-icon" aria-hidden="true"></i>Message</button>
+              <button type="button" data-action="lease" data-booking-id="${esc(String(entry.id ?? ''))}"><i class="bi bi-eye mobile-action-icon" aria-hidden="true"></i>View Lease</button>
             </div>
           </td>
         </tr>`;
-    }).join('') || '<tr><td colspan="5" class="empty">No active tenants matched your search.</td></tr>';
+    }).join('') || '<tr class="empty-row"><td colspan="5" class="empty">No active tenants matched your search.</td></tr>';
     if (countBadge) countBadge.textContent = String(rows.length);
   };
 
@@ -192,7 +207,7 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
             <p><strong>Tenant:</strong> ${esc(entry.tenant_name || 'Tenant')}</p>
             <p><strong>Property:</strong> ${esc(unitLabel(entry))}</p>
             <p><strong>Move-in:</strong> ${esc(new Date(entry.move_in_date ?? Date.now()).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }))}</p>
-            <p><strong>Move-out:</strong> ${esc(new Date(entry.move_out_date ?? entry.move_in_date ?? Date.now()).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }))}</p>
+            <p><strong>Move-out:</strong> ${esc(formatLeaseEnd(entry))}</p>
             <p><strong>Occupants:</strong> ${esc(String(entry.occupants ?? 1))}</p>
             <p><strong>Rent:</strong> ${esc(entry.monthly_rent ? `₱${Number(entry.monthly_rent).toLocaleString('en-US')}` : '—')}</p>
           </div>
@@ -218,8 +233,11 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
     openModal(paymentModal);
   });
 
-  fetch(`${API}/bookings`, { headers: auth() })
-    .then(async (r) => {
+  const loadTenants = async () => {
+    if (isLoading || !root.isConnected) return;
+    isLoading = true;
+    try {
+      const r = await fetch(`${API}/bookings`, { headers: auth() });
       const b = await r.json();
       if (!r.ok) throw new Error(b.message ?? 'Unable to load active tenants.');
       allRows = Array.isArray(b.data)
@@ -231,10 +249,17 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
       const loadingCell = tbody.querySelector('.status');
       if (loadingCell) loadingCell.remove();
       await updateListingCountsInSidebar();
-    })
-    .catch((error) => {
+    } catch (error) {
       tbody.innerHTML = `<tr><td colspan="5" class="empty">${esc(error.message)}</td></tr>`;
-    });
+    } finally {
+      isLoading = false;
+    }
+  };
+
+  loadTenants();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadTenants();
+  });
 
   searchInput?.addEventListener('input', (event) => renderRows(event.target.value));
 
@@ -243,5 +268,3 @@ export function renderActiveTenant(root = document.querySelector('#app')) {
     location.assign('#/login');
   });
 }
-
-

@@ -1,24 +1,25 @@
-import { ensureAdminSidebarStyles, renderAdminSidebar } from './sidebarAdmin.js';
+import { ensureAdminSidebarStyles, loadAdminStylesheet, renderAdminSidebar } from './sidebarAdmin.js';
 import { applyAdminPrivacy } from './privacy.js';
+import { showToast } from '../../components/toast.js';
+import { withMediaAccessToken } from '../../services/mediaAccess.js';
 
 const API = window.DORMHIVE_API_URL ?? 'http://localhost:5000/api/v1';
 const headers = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('dormhive.accessToken') ?? ''}` });
 const esc = (value = '') => { const e = document.createElement('span'); e.textContent = value; return e.innerHTML; };
 
 function css() {
-  if (!document.querySelector('[data-admin-style="moderation"]')) {
-    const l = document.createElement('link');
-    l.rel = 'stylesheet';
-    l.href = new URL('./style/listingModeration.css', import.meta.url);
-    l.dataset.adminStyle = 'moderation';
-    document.head.append(l);
-  }
+  const stylesheet = new URL('./style/listingModeration.css', import.meta.url);
+  stylesheet.searchParams.set('v', 'moderation-approved-status-badge-6');
+  return loadAdminStylesheet('moderation', stylesheet);
 }
 
-export function renderListingModeration(root = document.querySelector('#app')) {
+export async function renderListingModeration(root = document.querySelector('#app')) {
   if (!root) throw new Error('Listing moderation requires #app.');
-  css();
-  ensureAdminSidebarStyles();
+  await Promise.all([css(), ensureAdminSidebarStyles()]);
+  const requestedStatus = new URLSearchParams(window.DORMHIVE_ROUTE_SEARCH || '').get('status');
+  const initialStatus = ['pending', 'approved', 'rejected'].includes(requestedStatus) ? requestedStatus : 'pending';
+  const initialStatusLabels = { pending: 'Pending Approvals', approved: 'Approved Listings', rejected: 'Rejected Listings' };
+  const initialLabel = initialStatusLabels[initialStatus];
 
   root.innerHTML = `
     <div class="admin-shell">
@@ -27,44 +28,47 @@ export function renderListingModeration(root = document.querySelector('#app')) {
         <main class="moderation-page">
           <header class="moderation-header">
             <div>
-              <h1>Listing Moderation: Pending Approvals</h1>
+              <div class="moderation-kicker-row"><div class="moderation-kicker">Moderation</div></div>
+              <h1>Listing Moderation: ${initialLabel}</h1>
+              <p>Manage and review property listings submitted by users.</p>
             </div>
-            <a class="header-link" href="#/admin/dashboardAdmin">← Overview</a>
+            <div class="moderation-header-meta"><span class="date-control"><i class="bi bi-calendar3" aria-hidden="true"></i> <time>${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</time></span><span class="updated-indicator"><span class="status-dot" aria-hidden="true"></span> Updated just now</span></div>
           </header>
 
           <section class="moderation-content">
             <div class="toolbar">
               <label class="search-field">
                 <span>⌕</span>
-                <input id="moderation-search" type="search" placeholder="Search" />
+                <input id="moderation-search" type="search" placeholder="Search listings by property name, owner, or location..." />
               </label>
               <label class="filter-field">
-                <span>Filter by Type</span>
                 <select id="moderation-filter">
                   <option value="all">All Types</option>
-                  <option value="Bed Space">Bed Space</option>
-                  <option value="Studio Unit BGC">Studio Unit BGC</option>
-                  <option value="Solo Room">Solo Room</option>
-                  <option value="Dormitory">Dormitory</option>
-                  <option value="Private Room">Private Room</option>
-                  <option value="Apartment">Apartment</option>
+                  <option value="bedspace">Bedspace</option>
+                  <option value="private_room">Solo Room</option>
+                  <option value="entire_unit">Studio Unit</option>
                 </select>
               </label>
-              <button class="bulk-actions" type="button">Bulk Actions</button>
             </div>
             <div class="moderation-tabs" role="tablist">
-              <button type="button" class="moderation-tab active" data-status="pending">Pending Approvals</button>
-              <button type="button" class="moderation-tab" data-status="approved">Approved Listings</button>
-              <button type="button" class="moderation-tab" data-status="rejected">Rejected Listings</button>
+              <button type="button" class="moderation-tab${initialStatus === 'pending' ? ' active' : ''}" data-status="pending">Pending Approvals</button>
+              <button type="button" class="moderation-tab${initialStatus === 'approved' ? ' active' : ''}" data-status="approved">Approved Listings</button>
+              <button type="button" class="moderation-tab${initialStatus === 'rejected' ? ' active' : ''}" data-status="rejected">Rejected Listings</button>
             </div>
             <div id="moderation-status" class="moderation-status"></div>
 
             <div class="moderation-layout">
               <section class="table-shell">
+                <div class="table-heading">
+                  <div class="table-heading-copy">
+                    <span class="table-heading-icon" aria-hidden="true">⌂</span>
+                    <div><h2 id="listing-card-title">${initialLabel}</h2><p id="listing-card-subtitle">Showing ${initialLabel.toLowerCase()}.</p></div>
+                  </div>
+                  <span id="listing-total" class="listing-total">0 total</span>
+                </div>
                 <table class="moderation-table">
                   <thead>
                     <tr>
-                      <th><input type="checkbox" aria-label="Select all" /></th>
                       <th>Thumbnail</th>
                       <th>Property Name</th>
                       <th>Owner Name</th>
@@ -76,11 +80,6 @@ export function renderListingModeration(root = document.querySelector('#app')) {
                   </thead>
                   <tbody id="moderation-rows"></tbody>
                 </table>
-                <div class="pagination">
-                  <button type="button">‹</button>
-                  <button type="button" class="active">1</button>
-                  <button type="button">›</button>
-                </div>
               </section>
 
               <aside id="detail-panel" class="detail-panel">
@@ -95,12 +94,12 @@ export function renderListingModeration(root = document.querySelector('#app')) {
                 <div class="detail-body">
                   <h2 id="detail-name">Select a listing</h2>
                   <p id="detail-address">No property selected.</p>
-                  <p class="detail-meta">📍 <span id="detail-location">Waiting for backend data…</span></p>
-                  <p class="detail-meta">👤 <span id="detail-owner">Owner details will appear here.</span></p>
-                  <p class="detail-meta">🟡 <span id="detail-status">Status pending review</span></p>
+                  <p class="detail-meta detail-location">📍 <span id="detail-location">Waiting for backend data…</span></p>
+                  <p class="detail-meta detail-owner">👤 <span id="detail-owner">Owner details will appear here.</span></p>
+                  <p class="detail-meta detail-status"><span class="status-dot" aria-hidden="true"></span><span id="detail-status">Status pending review</span></p>
                   <div class="detail-extra" id="detail-extra"></div>
                   <div class="detail-actions">
-                    <button type="button" class="secondary owner-contact">Owner Contact</button>
+                      <button type="button" class="secondary owner-contact">Owner Contact</button>
                     <button type="button" class="primary approve">Approve</button>
                     <button type="button" class="danger reject">Reject</button>
                     <button type="button" class="primary view-listing hidden">View Listing</button>
@@ -141,7 +140,12 @@ export function renderListingModeration(root = document.querySelector('#app')) {
       </div>
     </div>`;
 
-  const tbody = root.querySelector('#moderation-rows');
+    const mobileMenu = root.querySelector('.admin-mobile-menu');
+    const moderationKickerRow = root.querySelector('.moderation-kicker-row');
+    if (mobileMenu && moderationKickerRow) moderationKickerRow.prepend(mobileMenu);
+
+    const tbody = root.querySelector('#moderation-rows');
+    const tableShell = root.querySelector('.table-shell');
   const searchInput = root.querySelector('#moderation-search');
   const typeFilter = root.querySelector('#moderation-filter');
   const tabs = Array.from(root.querySelectorAll('.moderation-tab'));
@@ -158,6 +162,9 @@ export function renderListingModeration(root = document.querySelector('#app')) {
   const viewButton = root.querySelector('.detail-actions .view-listing');
   const ownerContactButton = root.querySelector('.detail-actions .owner-contact');
   const statusLabel = root.querySelector('#moderation-status');
+  const listingCardTitle = root.querySelector('#listing-card-title');
+  const listingCardSubtitle = root.querySelector('#listing-card-subtitle');
+  const listingTotal = root.querySelector('#listing-total');
   const modal = root.querySelector('#listing-view-modal');
   const modalClose = root.querySelector('.modal-close');
   const modalTitle = root.querySelector('#modal-title');
@@ -179,7 +186,7 @@ export function renderListingModeration(root = document.querySelector('#app')) {
     approved: 'Approved Listings',
     rejected: 'Rejected Listings'
   };
-  let currentStatus = 'pending';
+  let currentStatus = initialStatus;
   let rows = [];
   let selected = null;
 
@@ -187,13 +194,61 @@ export function renderListingModeration(root = document.querySelector('#app')) {
   const resolveImageUrl = (value = '') => {
     const url = String(value || '').trim();
     if (!url) return '';
-    if (/^https?:\/\//i.test(url)) return url;
-    return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+    return withMediaAccessToken(/^https?:\/\//i.test(url) ? url : `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`);
+  };
+
+  const getPropertyImages = (row = {}) => {
+    let images = row.images;
+    if (typeof images === 'string') {
+      try { images = JSON.parse(images); } catch { images = []; }
+    }
+    const sources = [row.image_url, ...(Array.isArray(images) ? images : [])].filter(Boolean);
+    return [...new Set(sources.map(resolveImageUrl).filter(Boolean))];
   };
 
   const getThumbStyles = (row) => {
     const image = resolveImageUrl(row.image_url);
-    return image ? `style="background-image:url('${image}')"` : '';
+    return image ? `style="background-image:url('${image}');background-position:center;background-size:cover;background-repeat:no-repeat"` : '';
+  };
+
+  const openPhotoViewer = (row) => {
+    const photos = getPropertyImages(row);
+    if (!photos.length) return;
+    let photoIndex = 0;
+    const viewer = document.createElement('dialog');
+    viewer.className = 'moderation-photo-viewer';
+    const image = document.createElement('img');
+    image.className = 'moderation-photo-viewer__image';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'moderation-photo-viewer__close';
+    closeButton.setAttribute('aria-label', 'Close photo viewer');
+    closeButton.textContent = '×';
+    const previousButton = document.createElement('button');
+    previousButton.type = 'button';
+    previousButton.className = 'moderation-photo-viewer__nav moderation-photo-viewer__nav--previous';
+    previousButton.setAttribute('aria-label', 'View previous photo');
+    previousButton.textContent = '‹';
+    const nextButton = document.createElement('button');
+    nextButton.type = 'button';
+    nextButton.className = 'moderation-photo-viewer__nav moderation-photo-viewer__nav--next';
+    nextButton.setAttribute('aria-label', 'View next photo');
+    nextButton.textContent = '›';
+    const renderPhoto = () => {
+      image.src = photos[photoIndex];
+      image.alt = `${row.title || 'Property'} photo ${photoIndex + 1}`;
+      previousButton.hidden = photos.length < 2;
+      nextButton.hidden = photos.length < 2;
+    };
+    previousButton.addEventListener('click', () => { photoIndex = (photoIndex - 1 + photos.length) % photos.length; renderPhoto(); });
+    nextButton.addEventListener('click', () => { photoIndex = (photoIndex + 1) % photos.length; renderPhoto(); });
+    closeButton.addEventListener('click', () => viewer.close());
+    viewer.addEventListener('click', (event) => { if (event.target === viewer) viewer.close(); });
+    viewer.addEventListener('close', () => viewer.remove(), { once: true });
+    viewer.append(image, previousButton, nextButton, closeButton);
+    document.body.append(viewer);
+    renderPhoto();
+    viewer.showModal();
   };
 
   const formatCurrency = (value = 0) => `₱${Number(value ?? 0).toLocaleString()}`;
@@ -202,8 +257,14 @@ export function renderListingModeration(root = document.querySelector('#app')) {
 
   const setActiveTab = (status) => {
     currentStatus = status;
+    const nextSearch = new URLSearchParams(window.DORMHIVE_ROUTE_SEARCH || '');
+    nextSearch.set('status', status);
+    history.replaceState({}, '', `#/admin/listingModeration?${nextSearch}`);
+    window.DORMHIVE_ROUTE_SEARCH = `?${nextSearch}`;
     tabs.forEach((button) => button.classList.toggle('active', button.dataset.status === status));
     headerTitle.textContent = `Listing Moderation: ${statusLabels[status] ?? 'Moderation'}`;
+    listingCardTitle.textContent = statusLabels[status] ?? 'Listings';
+    listingCardSubtitle.textContent = `Showing ${statusLabels[status]?.toLowerCase() ?? 'listings'}.`;
     clearSelection();
     load();
   };
@@ -247,15 +308,29 @@ export function renderListingModeration(root = document.querySelector('#app')) {
     detailOwner.textContent = `Owner: ${row.owner_name || row.owner_id || 'Unknown owner'}`;
     detailStatus.textContent = String(row.status || 'pending').replaceAll('_', ' ');
     detailExtra.innerHTML = `
-      <p data-privacy-mask="detail">Type: ${esc(String(row.room_type || 'Unknown').replaceAll('_', ' '))}</p>
-      <p data-privacy-mask="stat">Rent: ${esc(formatCurrency(row.monthly_rent))}</p>
-      <p>Submitted: ${esc(formatDate(row.created_at))}</p>`;
+      <p data-label="Type" data-privacy-mask="detail">${esc(String(row.room_type || 'Unknown').replaceAll('_', ' '))}</p>
+      <p data-label="Rent" data-privacy-mask="stat">${esc(formatCurrency(row.monthly_rent))}</p>
+      <p data-label="Submitted">${esc(formatDate(row.created_at))}</p>`;
     applyAdminPrivacy(root);
-    const imageUrl = resolveImageUrl(row.image_url);
-    detailPhotos.innerHTML = imageUrl
-      ? `<div class="thumb" style="background-image:url('${imageUrl}')"></div>` + Array.from({ length: 5 }, () => '<div class="thumb"></div>').join('')
-      : Array.from({ length: 6 }, () => '<div class="thumb"></div>').join('');
+    const imageUrls = getPropertyImages(row);
+    const visibleImages = imageUrls.slice(0, 6);
+    const remainingCount = Math.max(0, imageUrls.length - 6);
+    const photoTiles = visibleImages.map((imageUrl, index) => {
+      const showCount = index === visibleImages.length - 1 && remainingCount > 0;
+      return `<div class="thumb${showCount ? ' has-more' : ''}" style="background-image:url('${esc(imageUrl)}');background-position:center;background-size:cover;background-repeat:no-repeat">${showCount ? `<span>+${remainingCount}</span>` : ''}</div>`;
+    });
+    if (imageUrls.length > 3) {
+      photoTiles.splice(3, 0, `<div class="thumb has-more mobile-gallery-more" style="background-image:url('${esc(imageUrls[3])}');background-position:center;background-size:cover;background-repeat:no-repeat"><span>+${imageUrls.length - 3}</span></div>`);
+    }
+    detailPhotos.innerHTML = photoTiles.length ? photoTiles.join('') : '<div class="thumb"></div>';
     updateDetailActions();
+  };
+
+  const syncRowSelection = () => {
+    tbody.querySelectorAll('tr').forEach((rowEl) => {
+      const id = Number(rowEl.dataset.id);
+      rowEl.classList.toggle('selected', !!selected && id === selected.id);
+    });
   };
 
   const renderRows = () => {
@@ -267,26 +342,35 @@ export function renderListingModeration(root = document.querySelector('#app')) {
       return matchesQuery && matchesType;
     });
 
+    tableShell.classList.toggle('is-empty', visibleRows.length === 0);
     tbody.innerHTML = visibleRows.map((row) => `
-      <tr class="${selected?.id === row.id ? 'selected' : ''}">
-        <td><input type="checkbox" data-id="${row.id}" /></td>
-        <td><div class="thumbnail" ${getThumbStyles(row)}></div></td>
-        <td data-privacy-mask="detail">${esc(row.title || 'Untitled property')}</td>
-        <td data-privacy-mask="name">${esc(row.owner_name || 'Unknown owner')}</td>
-        <td data-privacy-mask="detail">${esc(String(row.room_type || 'Unknown').replaceAll('_', ' '))}</td>
-        <td data-privacy-mask="stat">${esc(formatCurrency(row.monthly_rent))}</td>
-        <td>${esc(formatDate(row.created_at))}</td>
+      <tr class="listing-summary-row${selected?.id === row.id ? ' selected' : ''}" data-id="${row.id}">
+        <td data-label="Thumbnail"><div class="thumbnail" ${getThumbStyles(row)}></div></td>
+        <td data-label="Property" data-privacy-mask="detail">${esc(row.title || 'Untitled property')}</td>
+        <td data-label="Owner" data-privacy-mask="name">${esc(row.owner_name || 'Unknown owner')}</td>
+        <td data-label="Type" data-privacy-mask="detail">${esc(String(row.room_type || 'Unknown').replaceAll('_', ' '))}</td>
+        <td data-label="Rent" data-privacy-mask="stat">${esc(formatCurrency(row.monthly_rent))}</td>
+        <td data-label="Submitted">${esc(formatDate(row.created_at))}</td>
         <td class="action-icons"><button type="button" aria-label="View details">🔎</button></td>
-      </tr>`).join('') || '<tr><td colspan="8" class="empty-row">No matching listings found.</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="7" class="empty-row">No matching listings found.</td></tr>';
 
     applyAdminPrivacy(root);
+    syncRowSelection();
 
     tbody.querySelectorAll('tr').forEach((rowEl) => {
+      rowEl.querySelector('.thumbnail')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const row = rows.find((item) => item.id === Number(rowEl.dataset.id));
+        if (row) openPhotoViewer(row);
+      });
       rowEl.addEventListener('click', (event) => {
-        if (event.target.tagName === 'INPUT') return;
-        const id = rowEl.querySelector('input')?.dataset.id;
-        const row = rows.find((item) => item.id === Number(id));
-        if (row) syncDetails(row);
+        if (event.target.closest('button')) return;
+        const id = Number(rowEl.dataset.id);
+        const row = rows.find((item) => item.id === id);
+        if (row) {
+          syncDetails(row);
+          syncRowSelection();
+        }
       });
     });
   };
@@ -297,9 +381,13 @@ export function renderListingModeration(root = document.querySelector('#app')) {
       const body = await response.json();
       if (!response.ok) throw new Error(body.message ?? 'Unable to load listings.');
       rows = Array.isArray(body.data) ? body.data : [];
+      listingCardTitle.textContent = statusLabels[currentStatus] ?? 'Listings';
+      listingCardSubtitle.textContent = `Showing ${rows.length} ${statusLabels[currentStatus].toLowerCase()}.`;
+      listingTotal.textContent = `${rows.length} total`;
       if (!rows.length) {
+        tableShell.classList.add('is-empty');
         statusLabel.textContent = `No ${statusLabels[currentStatus].toLowerCase()} found.`;
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-row">No listings available for this tab.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-row">No listings available for this tab.</td></tr>';
         clearSelection();
         return;
       }
@@ -308,6 +396,7 @@ export function renderListingModeration(root = document.querySelector('#app')) {
       syncDetails(selected);
       renderRows();
     } catch (error) {
+      tableShell.classList.add('is-empty');
       statusLabel.textContent = error.message;
       clearSelection();
       detailName.textContent = 'Unable to load listing details';
@@ -350,7 +439,7 @@ export function renderListingModeration(root = document.querySelector('#app')) {
       // If the selected row was removed, select the next one; otherwise refresh details.
       if (!rows.length) {
         clearSelection();
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-row">No listings available for this tab.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-row">No listings available for this tab.</td></tr>';
       } else {
         if (!rows.find((r) => r.id === movedId)) {
           selected = rows[0];
@@ -363,6 +452,7 @@ export function renderListingModeration(root = document.querySelector('#app')) {
 
       renderRows();
       statusLabel.textContent = `Listing ${status} successfully.`;
+      showToast({ message: `Listing ${status} successfully.`, type: 'success' });
       approveButton.disabled = rejectButton.disabled = false;
     } catch (error) {
       statusLabel.textContent = error.message;
@@ -411,6 +501,36 @@ export function renderListingModeration(root = document.querySelector('#app')) {
 
   const closeModal = () => modal.setAttribute('hidden', '');
 
+  const openPhotoPreview = (imageUrls, startIndex = 0) => {
+    if (!imageUrls.length) return;
+    const preview = document.createElement('div');
+    preview.className = 'photo-preview-modal';
+    preview.innerHTML = '<button type="button" class="photo-preview-close" aria-label="Close photo">×</button><button type="button" class="photo-preview-arrow photo-preview-previous" aria-label="Previous photo">‹</button><img alt="Property photo preview"><button type="button" class="photo-preview-arrow photo-preview-next" aria-label="Next photo">›</button>';
+    const image = preview.querySelector('img');
+    let currentIndex = (startIndex + imageUrls.length) % imageUrls.length;
+    const showImage = (index) => {
+      currentIndex = (index + imageUrls.length) % imageUrls.length;
+      image.src = imageUrls[currentIndex];
+      image.alt = `Property photo ${currentIndex + 1} of ${imageUrls.length}`;
+    };
+    showImage(currentIndex);
+    const closePreview = () => preview.remove();
+    preview.querySelector('.photo-preview-close').addEventListener('click', closePreview);
+    preview.querySelector('.photo-preview-previous').addEventListener('click', () => showImage(currentIndex - 1));
+    preview.querySelector('.photo-preview-next').addEventListener('click', () => showImage(currentIndex + 1));
+    preview.addEventListener('click', (event) => {
+      if (event.target === preview) closePreview();
+    });
+    preview.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft') showImage(currentIndex - 1);
+      if (event.key === 'ArrowRight') showImage(currentIndex + 1);
+      if (event.key === 'Escape') closePreview();
+    });
+    document.body.append(preview);
+    preview.tabIndex = -1;
+    preview.focus();
+  };
+
   tabs.forEach((button) => {
     button.addEventListener('click', () => setActiveTab(button.dataset.status));
   });
@@ -421,15 +541,50 @@ export function renderListingModeration(root = document.querySelector('#app')) {
     updatePropertyStatus('rejected', reason.trim());
   });
   viewButton?.addEventListener('click', openModal);
+  ownerContactButton?.addEventListener('click', async () => {
+    if (!selected) return;
+    const ownerEmail = String(selected.owner_email || selected.ownerEmail || selected.email || '').trim();
+    if (!ownerEmail) {
+      showToast({ message: 'No email address is available for this owner.', type: 'error' });
+      return;
+    }
+
+    const subject = `DormHive listing: ${selected.title || 'Property listing'}`;
+    const body = `Hello ${selected.owner_name || 'Owner'},\n\nI am contacting you about your DormHive listing "${selected.title || 'Property listing'}".`;
+    const mailtoLink = `mailto:${encodeURIComponent(ownerEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    try {
+      window.location.href = mailtoLink;
+      setTimeout(() => {
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(ownerEmail).catch(() => {});
+        }
+      }, 250);
+    } catch {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(ownerEmail);
+          showToast({ message: `Owner email copied: ${ownerEmail}`, type: 'success' });
+          return;
+        } catch {}
+      }
+      showToast({ message: 'Unable to open email client. Please copy the owner email manually.', type: 'error' });
+    }
+  });
   modalClose?.addEventListener('click', closeModal);
   modal?.addEventListener('click', (event) => {
     if (event.target === modal) closeModal();
+  });
+  detailPhotos.addEventListener('click', (event) => {
+    const tile = event.target.closest('.thumb[style*="background-image"]');
+    if (!tile) return;
+    if (!selected) return;
+    const imageUrls = getPropertyImages(selected);
+    const tileIndex = Array.from(detailPhotos.querySelectorAll('.thumb[style*="background-image"]')).indexOf(tile);
+    if (imageUrls.length) openPhotoPreview(imageUrls, Math.max(0, tileIndex));
   });
 
   searchInput.addEventListener('input', renderRows);
   typeFilter.addEventListener('change', renderRows);
   load();
 }
-
-
-

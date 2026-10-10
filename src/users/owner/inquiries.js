@@ -1,24 +1,40 @@
-import { ensureOwnerSidebarStyles, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { ensureOwnerSidebarStyles, loadOwnerStylesheet, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { withMediaAccessToken } from '../../services/mediaAccess.js';
 
 const API = window.DORMHIVE_API_URL ?? 'http://localhost:5000/api/v1';
+const API_ORIGIN = API.replace(/\/api\/v1\/?$/, '');
 const auth = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('dormhive.accessToken') ?? ''}` });
 const esc = (v = '') => { const e = document.createElement('span'); e.textContent = v; return e.innerHTML; };
 const currentUser = () => { try { return JSON.parse(localStorage.getItem('dormhive.user') ?? '{}'); } catch { return {}; } };
+const initials = (value = '') => String(value ?? '').split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'T';
+const avatarUrl = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^(data:|blob:|https?:\/\/)/i.test(raw)) return raw;
+  return withMediaAccessToken(`${API_ORIGIN}${raw.startsWith('/') ? '' : '/'}${raw}`);
+};
+const renderTenantAvatar = (name = 'Tenant', image = '') => {
+  const source = avatarUrl(image);
+  if (!source) {
+    return `<span class="fallback-avatar" aria-label="${esc(name)} avatar">${esc(initials(name))}</span>`;
+  }
+  return `<img src="${esc(source)}" alt="${esc(name)} profile" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-flex';" /><span class="fallback-avatar" style="display:none;">${esc(initials(name))}</span>`;
+};
+const renderAvatarMarkup = () => '';
 
 function css() {
-  if (!document.querySelector('[data-owner-style="inquiries"]')) {
-    const l = document.createElement('link');
-    l.rel = 'stylesheet';
-    l.href = new URL('./style/inquiries.css', import.meta.url);
-    l.dataset.ownerStyle = 'inquiries';
-    document.head.append(l);
-  }
+  const stylesheet = new URL('./style/inquiries.css', import.meta.url);
+  stylesheet.searchParams.set('v', 'mobile-inquiry-empty-actions-4');
+  return loadOwnerStylesheet('inquiries', stylesheet);
 }
 
 const statusInfo = (status) => {
-  if (status === 'approved') return { label: 'Replied', className: 'status-replied' };
-  if (status === 'rejected' || status === 'cancelled') return { label: 'Archived', className: 'status-archived' };
-  return { label: 'New Inquiry', className: 'status-new' };
+  const normalized = String(status ?? '').toLowerCase();
+  if (normalized === 'approved') return { label: 'Replied', className: 'status-replied' };
+  if (normalized === 'rejected') return { label: 'Rejected', className: 'status-archived' };
+  if (normalized === 'cancelled') return { label: 'Archived', className: 'status-archived' };
+  if (normalized === 'pending') return { label: 'Pending', className: 'status-pending' };
+  return { label: 'New', className: 'status-new' };
 };
 
 const formatDate = (value) => {
@@ -27,21 +43,36 @@ const formatDate = (value) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-export function renderInquiries(root = document.querySelector('#app')) {
+const formatViewingDate = (value) => {
+  const [year, month, day] = String(value ?? '').slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return '';
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
+const formatViewingTime = (value) => {
+  const [hours, minutes] = String(value ?? '').slice(0, 5).split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return '';
+  return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+};
+
+export async function renderInquiries(root = document.querySelector('#app')) {
   if (!root) throw new Error('Inquiries page requires #app.');
-  css();
-  ensureOwnerSidebarStyles();
+  await Promise.all([css(), ensureOwnerSidebarStyles()]);
 
   root.innerHTML = `
     <div class="owner-shell">
       ${renderOwnerSidebar('inquiries')}
       <div class="owner-main">
         <main class="inquiries-page">
-          <header>
-            <a class="brand" href="#/owner/dashboardOwner">DormHive</a>
-          </header>
-
           <section class="inquiries-board">
+            <div class="inquiries-header">
+              <div class="inquiries-heading-copy">
+                <p class="page-kicker">OWNER PORTFOLIO</p>
+                <h1>Inquiries</h1>
+              </div>
+              <p class="page-subtitle">Manage tenant inquiries, respond to prospective tenants, and track their status.</p>
+            </div>
+
             <div class="inquiries-toolbar">
               <label class="search-box">
                 <span>⌕</span>
@@ -57,7 +88,6 @@ export function renderInquiries(root = document.querySelector('#app')) {
                 </div>
 
                 <label class="property-filter">
-                  <span>Property</span>
                   <select id="property-filter">
                     <option value="all">All Properties</option>
                   </select>
@@ -66,28 +96,19 @@ export function renderInquiries(root = document.querySelector('#app')) {
             </div>
 
             <div class="inquiries-layout">
-              <section class="table-shell">
-                <div class="table-wrap">
-                  <table class="inquiries-table">
-                    <thead>
-                      <tr>
-                        <th>Tenant Name</th>
-                        <th>Property</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                        <th>Latest Message</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody id="inquiries-rows"></tbody>
-                  </table>
+              <section class="list-shell">
+                <div class="inquiry-table-header" aria-hidden="true">
+                  <div class="cell tenant-header">Tenant</div>
+                  <div class="cell property-header">Property</div>
+                  <div class="cell date-header">Date</div>
+                  <div class="cell status-header">Status</div>
+                  <div class="cell message-header">Latest Message</div>
+                  <div class="cell action-header">Actions</div>
                 </div>
-                <div class="pagination">
-                  <button type="button" data-page="prev" aria-label="Previous page">‹</button>
-                  <button type="button" data-page="1" class="active">1</button>
-                  <button type="button" data-page="2">2</button>
-                  <button type="button" data-page="3">3</button>
-                  <button type="button" data-page="next" aria-label="Next page">›</button>
+                <div id="inquiries-rows" class="inquiry-list" aria-live="polite"></div>
+
+                <div class="list-footer">
+                  <div id="pagination-summary" class="pagination-summary">Showing 0 to 0 of 0 inquiries</div>
                 </div>
               </section>
 
@@ -101,38 +122,63 @@ export function renderInquiries(root = document.querySelector('#app')) {
         </main>
       </div>
     </div>
-    
-    <div id="schedule-modal" class="schedule-modal" hidden>
-      <div class="schedule-modal-overlay"></div>
-      <div class="schedule-modal-content">
-        <div class="schedule-modal-header">
-          <h2>Schedule a Viewing</h2>
-          <button type="button" class="close-button" aria-label="Close">✕</button>
+
+    <div id="reply-modal" class="reply-modal" hidden>
+      <div class="reply-modal-overlay"></div>
+      <div class="reply-modal-card">
+        <div class="reply-modal-header">
+          <h2>Reply to <span id="reply-recipient">Tenant</span></h2>
         </div>
-        <div class="schedule-modal-body">
-          <div class="detail-row">
-            <label>Tenant</label>
-            <p id="schedule-tenant-name">—</p>
-          </div>
-          <div class="detail-row">
-            <label>Property</label>
-            <p id="schedule-property-name">—</p>
-          </div>
-          <div class="detail-row">
-            <label for="schedule-date">Date</label>
-            <input type="date" id="schedule-date" />
-          </div>
-          <div class="detail-row">
-            <label for="schedule-time">Time</label>
-            <input type="time" id="schedule-time" />
-          </div>
+        <div class="reply-modal-body">
+          <textarea id="reply-message" rows="6" placeholder="Write your message..."></textarea>
         </div>
-        <div class="schedule-modal-footer">
-          <button type="button" class="secondary-btn cancel-btn">Cancel</button>
-          <button type="button" class="primary-btn save-btn">Schedule Viewing</button>
+        <div class="reply-modal-footer">
+          <button type="button" class="secondary-btn reply-cancel">Cancel</button>
+          <button type="button" class="primary-btn reply-send">Send</button>
         </div>
       </div>
+    </div>
+
+    <div id="archive-confirm-modal" class="archive-confirm-modal" hidden>
+      <div class="archive-confirm-overlay"></div>
+      <div class="archive-confirm-card">
+        <div class="archive-confirm-header">
+          <h2 id="archive-confirm-title">Reject Tenant</h2>
+        </div>
+        <div class="archive-confirm-body">
+          <p id="archive-confirm-text">Are you sure you want to reject this tenant inquiry?</p>
+        </div>
+        <div class="archive-confirm-footer">
+          <button type="button" class="secondary-btn archive-cancel-btn">Cancel</button>
+          <button type="button" class="primary-btn archive-confirm-btn">Reject Tenant</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="success-modal" class="success-modal" hidden>
+      <div class="success-modal-overlay"></div>
+      <div class="success-modal-card" role="dialog" aria-modal="true" aria-labelledby="success-modal-title">
+        <div class="success-modal-icon" aria-hidden="true">
+          <span class="success-dot dot-one"></span>
+          <span class="success-dot dot-two"></span>
+          <span class="success-dot dot-three"></span>
+          <span class="success-dot dot-four"></span>
+          <span class="success-check">✓</span>
+        </div>
+        <h2 id="success-modal-title">Success!</h2>
+        <p class="success-modal-message">Tenant accepted successfully!</p>
+        <p class="success-modal-submessage">They will now appear in Active Tenants.</p>
+        <button type="button" class="success-ok-btn">OK</button>
+      </div>
     </div>`;
+
+  const ownerMenuButton = root.querySelector('.owner-mobile-menu');
+  ownerMenuButton.dataset.ownerMenuBound = 'true';
+  ownerMenuButton.addEventListener('click', () => {
+    const isOpen = ownerMenuButton.closest('.owner-shell').classList.toggle('nav-open');
+    ownerMenuButton.setAttribute('aria-expanded', String(isOpen));
+    ownerMenuButton.setAttribute('aria-label', isOpen ? 'Close owner menu' : 'Open owner menu');
+  });
 
   const state = {
     bookings: [],
@@ -150,29 +196,40 @@ export function renderInquiries(root = document.querySelector('#app')) {
   const searchInput = root.querySelector('#inquiry-search');
   const propertyFilter = root.querySelector('#property-filter');
   const detailPanel = root.querySelector('#tenant-detail-panel');
+  const paginationSummary = root.querySelector('#pagination-summary');
   const paginationButtons = root.querySelectorAll('.pagination button[data-page]');
 
-  const scheduleModal = root.querySelector('#schedule-modal');
-  const scheduleCloseBtn = scheduleModal.querySelector('.close-button');
-  const scheduleCancelBtn = scheduleModal.querySelector('.cancel-btn');
-  const scheduleSaveBtn = scheduleModal.querySelector('.save-btn');
-  const scheduleTenantName = scheduleModal.querySelector('#schedule-tenant-name');
-  const schedulePropertyName = scheduleModal.querySelector('#schedule-property-name');
-  const scheduleDate = scheduleModal.querySelector('#schedule-date');
-  const scheduleTime = scheduleModal.querySelector('#schedule-time');
+  const replyModal = root.querySelector('#reply-modal');
+  const replyRecipient = root.querySelector('#reply-recipient');
+  const replyMessageInput = root.querySelector('#reply-message');
+  const replyCancelBtn = root.querySelector('.reply-cancel');
+  const replySendBtn = root.querySelector('.reply-send');
+
+  const archiveConfirmModal = root.querySelector('#archive-confirm-modal');
+  const archiveConfirmTitle = root.querySelector('#archive-confirm-title');
+  const archiveConfirmText = root.querySelector('#archive-confirm-text');
+  const archiveConfirmCancelBtn = root.querySelector('.archive-cancel-btn');
+  const archiveConfirmActionBtn = root.querySelector('.archive-confirm-btn');
+
+  const successModal = root.querySelector('#success-modal');
+  const successOkBtn = root.querySelector('.success-ok-btn');
   
-  let schedulingBooking = null;
+  let pendingArchiveBooking = null;
+  let isLoading = false;
 
   const getCurrentUser = () => { try { return JSON.parse(localStorage.getItem('dormhive.user') ?? '{}'); } catch { return {}; } };
 
   const getVisibleBookings = () => {
     const query = state.search.trim().toLowerCase();
     return state.bookings.filter((booking) => {
+      const normalizedStatus = String(booking.status ?? '').toLowerCase();
+      if (normalizedStatus === 'approved') return false;
+
       const matchesSearch = !query || `${booking.tenant_name ?? ''} ${booking.property_title ?? ''} ${booking.message ?? ''}`.toLowerCase().includes(query);
       const matchesStatus = state.statusFilter === 'all'
-        || (state.statusFilter === 'new' && String(booking.status ?? '').toLowerCase() === 'pending')
-        || (state.statusFilter === 'pending' && String(booking.status ?? '').toLowerCase() === 'pending')
-        || (state.statusFilter === 'replied' && String(booking.status ?? '').toLowerCase() === 'approved');
+        || (state.statusFilter === 'new' && normalizedStatus === 'pending')
+        || (state.statusFilter === 'pending' && normalizedStatus === 'pending')
+        || (state.statusFilter === 'replied' && normalizedStatus === 'replied');
       const matchesProperty = state.propertyFilter === 'all' || String(booking.property_id) === String(state.propertyFilter);
       return matchesSearch && matchesStatus && matchesProperty;
     });
@@ -185,6 +242,15 @@ export function renderInquiries(root = document.querySelector('#app')) {
     }
     propertyFilter.innerHTML = options.join('');
     propertyFilter.value = state.propertyFilter;
+  };
+
+  const changePage = (nextPage) => {
+    const totalPages = Math.max(1, Math.ceil(getVisibleBookings().length / state.pageSize));
+    const safePage = Math.min(Math.max(1, Number(nextPage) || 1), totalPages);
+    if (safePage !== state.page) {
+      state.page = safePage;
+      renderRows();
+    }
   };
 
   const renderPagination = (visible = getVisibleBookings()) => {
@@ -203,24 +269,56 @@ export function renderInquiries(root = document.querySelector('#app')) {
         button.classList.toggle('active', state.page === pageNumber);
       }
     });
+
+    const start = visible.length ? (state.page - 1) * state.pageSize + 1 : 0;
+    const end = Math.min(state.page * state.pageSize, visible.length);
+    if (paginationSummary) {
+      paginationSummary.textContent = `Showing ${start} to ${end} of ${visible.length} inquiries`;
+    }
   };
 
   const renderDetailPanel = () => {
     if (!detailPanel) return;
     if (!state.selected) {
-      detailPanel.innerHTML = '<div class="detail-placeholder">Select a tenant row to view inquiry details.</div>';
+      detailPanel.innerHTML = `
+        <div class="empty-detail-state">
+          <div class="empty-state-icon">✉</div>
+          <h3>No inquiries yet</h3>
+          <p>When tenants inquire about your properties, they will appear here.</p>
+        </div>`;
       return;
     }
 
     const booking = state.selected;
-    const latestMessage = booking.message || 'No additional message yet.';
     const info = statusInfo(booking.status);
+    const latestMessage = booking.message || 'No message provided.';
+    const tenantName = booking.tenant_name || 'Unknown tenant';
+    const moveOutDate = booking.is_indefinite_move_out === true || Number(booking.is_indefinite_move_out) === 1
+      ? 'Indefinite'
+      : booking.move_out_date ? formatDate(booking.move_out_date) : 'Not specified';
+    const hasTenantViewingSchedule = booking.viewing_schedule_tenant_submitted === true || Number(booking.viewing_schedule_tenant_submitted) === 1;
+    const viewingDate = hasTenantViewingSchedule ? formatViewingDate(booking.viewing_date) : '';
+    const viewingTime = hasTenantViewingSchedule ? formatViewingTime(booking.viewing_time) : '';
 
     detailPanel.innerHTML = `
       <div class="detail-header">
-        <div>
+        <div class="detail-title-wrap">
           <p class="detail-kicker">Inquiry Details</p>
-          <h3>${esc(booking.tenant_name || 'Unknown tenant')}</h3>
+        </div>
+        <div class="menu-wrap">
+          <button type="button" class="more-menu" aria-label="More actions">⋮</button>
+          <div class="detail-menu" hidden>
+            <button type="button" class="menu-delete">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-person">
+        <div class="tenant-profile-heading">
+          <span class="tenant-avatar detail-avatar">${renderTenantAvatar(tenantName, booking.tenant_avatar_url || booking.avatar_url || '')}</span>
+          <div class="detail-name-wrap">
+            <strong>${esc(tenantName)}</strong>
+          </div>
         </div>
         <span class="badge ${info.className}">${esc(info.label)}</span>
       </div>
@@ -239,25 +337,59 @@ export function renderInquiries(root = document.querySelector('#app')) {
           <strong>${esc(formatDate(booking.move_in_date || booking.created_at))}</strong>
         </div>
         <div class="detail-item">
+          <span class="detail-label">Move-out Date</span>
+          <strong>${esc(moveOutDate)}</strong>
+        </div>
+        <div class="detail-item">
           <span class="detail-label">Inquiry Date</span>
           <strong>${esc(formatDate(booking.created_at))}</strong>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Viewing Schedule</span>
+          ${viewingDate && viewingTime
+            ? `<strong>Date: ${esc(viewingDate)}<br>Time: ${esc(viewingTime)}</strong>`
+            : '<strong>Not scheduled</strong>'}
         </div>
       </div>
 
       <div class="detail-actions">
-        <button type="button" class="primary-btn schedule-panel-action">Schedule Viewing</button>
         <button type="button" class="accept-action">Accept Tenant</button>
-        <button type="button" class="danger-btn archive-panel-action">Archive</button>
+        <button type="button" class="secondary-btn reject-tenant-panel-action">Reject Tenant</button>
       </div>
     `;
 
-    const schedulePanelAction = detailPanel.querySelector('.schedule-panel-action');
-    const acceptPanelAction = detailPanel.querySelector('.accept-action');
-    const archivePanelAction = detailPanel.querySelector('.archive-panel-action');
+    const moreMenuButton = detailPanel.querySelector('.more-menu');
+    const detailMenu = detailPanel.querySelector('.detail-menu');
+    const menuDelete = detailPanel.querySelector('.menu-delete');
 
-    schedulePanelAction?.addEventListener('click', () => openScheduleModal(booking));
-    acceptPanelAction?.addEventListener('click', () => acceptTenant());
-    archivePanelAction?.addEventListener('click', () => archiveBooking(booking));
+    detailMenu.hidden = true;
+
+    const closeMenu = (event) => {
+      if (!detailMenu) return;
+      const target = event?.target;
+      if (!target || (!detailPanel.contains(target) && !target.closest?.('.more-menu'))) {
+        detailMenu.hidden = true;
+        moreMenuButton?.setAttribute('aria-expanded', 'false');
+      }
+    };
+
+    document.removeEventListener('click', closeMenu);
+    document.addEventListener('click', closeMenu);
+
+    moreMenuButton?.setAttribute('aria-expanded', 'false');
+    moreMenuButton?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (!detailMenu) return;
+      const nextState = detailMenu.hidden;
+      detailMenu.hidden = !nextState;
+      moreMenuButton.setAttribute('aria-expanded', String(!detailMenu.hidden));
+    });
+
+    menuDelete?.addEventListener('click', () => {
+      detailMenu.hidden = true;
+      deleteBooking(booking);
+    });
+
   };
 
   const renderRows = () => {
@@ -265,32 +397,62 @@ export function renderInquiries(root = document.querySelector('#app')) {
     const totalPages = Math.max(1, Math.ceil(visible.length / state.pageSize));
     if (state.page > totalPages) state.page = totalPages;
 
-    const offset = (state.page - 1) * state.pageSize;
-    const pageItems = visible.slice(offset, offset + state.pageSize);
+    const pageItems = visible;
 
+    if (!tbody) return;
+
+    if (!pageItems.length) {
+      root.querySelector('.list-shell')?.classList.add('is-empty');
+      tbody.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">✉</div>
+          <h3>No inquiries yet</h3>
+          <p>When tenants inquire about your properties, they will appear here.</p>
+        </div>`;
+      renderPagination(visible);
+      return;
+    }
+
+    root.querySelector('.list-shell')?.classList.remove('is-empty');
     tbody.innerHTML = pageItems.map((booking) => {
       const info = statusInfo(booking.status);
       const selectedClass = state.selected?.id === booking.id ? 'selected' : '';
+      const tenantName = booking.tenant_name || 'Unknown tenant';
+      const dateValue = formatDate(booking.move_in_date || booking.created_at);
+      const messageText = booking.message || 'No message provided.';
+
       return `
-        <tr class="${selectedClass}" data-booking-id="${booking.id}">
-          <td>${esc(booking.tenant_name || 'Unknown tenant')}</td>
-          <td>${esc(booking.property_title || 'Unknown property')}</td>
-          <td>${esc(formatDate(booking.move_in_date || booking.created_at))}</td>
-          <td><span class="badge ${info.className}">${esc(info.label)}</span></td>
-          <td>${esc(booking.message || 'No message provided.')}</td>
-          <td>
-            <div class="actions-group">
-              <button type="button" class="table-action reply-action" data-booking-id="${booking.id}" data-action="reply" title="Reply">Reply</button>
+        <div class="inquiry-row ${selectedClass}" data-booking-id="${booking.id}">
+          <div class="cell tenant-cell">
+            <div class="tenant-name-group">
+              <span class="tenant-avatar inquiry-avatar">${renderTenantAvatar(tenantName, booking.tenant_avatar_url || booking.avatar_url || '')}</span>
+              <span>${esc(tenantName)}</span>
             </div>
-          </td>
-        </tr>`;
-    }).join('') || '<tr><td colspan="6" class="empty-row">No inquiries found.</td></tr>';
+          </div>
+          <div class="cell property-cell">${esc(booking.property_title || 'Unknown property')}</div>
+          <div class="cell date-cell">
+            <div class="date-stack">
+              <span>${esc(dateValue)}</span>
+              <small>${esc(new Date(booking.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }))}</small>
+            </div>
+          </div>
+          <div class="cell status-cell">
+            <span class="badge ${info.className}">${esc(info.label)}</span>
+          </div>
+          <div class="cell message-cell">${esc(messageText)}</div>
+          <div class="cell action-cell">
+            <button type="button" class="reply-action" data-booking-id="${booking.id}" aria-label="Reply" title="Reply">
+              <i class="bi bi-send" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>`;
+    }).join('');
 
     renderPagination(visible);
 
-    tbody.querySelectorAll('tr[data-booking-id]').forEach((row) => {
+    tbody.querySelectorAll('.inquiry-row').forEach((row) => {
       row.addEventListener('click', (event) => {
-        if (event.target.closest('.table-action')) return;
+        if (event.target.closest('.reply-action')) return;
         const id = Number(row.dataset.bookingId);
         const booking = state.bookings.find((item) => item.id === id);
         if (booking) selectBooking(booking);
@@ -302,7 +464,14 @@ export function renderInquiries(root = document.querySelector('#app')) {
         event.stopPropagation();
         const id = Number(button.dataset.bookingId);
         const booking = state.bookings.find((item) => item.id === id);
-        if (booking) openReplyThread(booking);
+        if (!booking) return;
+        localStorage.setItem('dormhive.activeTenantSelection', JSON.stringify({
+          tenantId: booking.tenant_id,
+          propertyId: booking.property_id,
+          tenantName: booking.tenant_name || 'Tenant',
+          propertyTitle: booking.property_title || 'Property'
+        }));
+        location.hash = '#/owner/message';
       });
     });
   };
@@ -330,6 +499,18 @@ export function renderInquiries(root = document.querySelector('#app')) {
     renderDetailPanel();
   };
 
+  const closeSuccessModal = () => {
+    if (!successModal) return;
+    successModal.hidden = true;
+    document.body.classList.remove('success-modal-open');
+  };
+
+  const openSuccessModal = () => {
+    if (!successModal) return;
+    successModal.hidden = false;
+    document.body.classList.add('success-modal-open');
+  };
+
   const acceptTenant = async () => {
     if (!state.selected) return;
     try {
@@ -340,18 +521,40 @@ export function renderInquiries(root = document.querySelector('#app')) {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.message || 'Unable to accept tenant.');
-      state.bookings = state.bookings.map((booking) => booking.id === state.selected.id ? { ...booking, status: 'approved' } : booking);
-      state.selected = state.bookings.find((booking) => booking.id === state.selected.id) || null;
+
+      const acceptedBookingId = state.selected.id;
+      state.bookings = state.bookings.filter((booking) => booking.id !== acceptedBookingId);
+      state.selected = state.bookings[0] ?? null;
       renderRows();
       renderDetailPanel();
       await updateListingCountsInSidebar();
-      alert('Tenant accepted successfully! They will now appear in Active Tenants.');
+      openSuccessModal();
     } catch (error) {
       alert(error.message);
     }
   };
 
-  const archiveBooking = async (booking) => {
+  const closeArchiveConfirmation = () => {
+    pendingArchiveBooking = null;
+    archiveConfirmModal.hidden = true;
+    document.body.classList.remove('archive-confirm-open');
+  };
+
+  const openInquiryConfirmation = (booking, action = 'reject') => {
+    if (!booking) return;
+    pendingArchiveBooking = booking;
+    const isDelete = action === 'delete';
+    archiveConfirmTitle.textContent = isDelete ? 'Delete Inquiry' : 'Reject Tenant';
+    archiveConfirmText.textContent = isDelete
+      ? `Are you sure you want to delete this inquiry from ${booking.tenant_name || 'this tenant'}?`
+      : `Are you sure you want to reject the inquiry from ${booking.tenant_name || 'this tenant'}?`;
+    archiveConfirmActionBtn.textContent = isDelete ? 'Delete Property' : 'Reject Tenant';
+    archiveConfirmActionBtn.dataset.action = action;
+    archiveConfirmModal.hidden = false;
+    document.body.classList.add('archive-confirm-open');
+  };
+
+  const rejectTenantInquiry = async (booking) => {
     if (!booking) return;
     try {
       const response = await fetch(`${API}/bookings/${booking.id}/status`, {
@@ -360,71 +563,45 @@ export function renderInquiries(root = document.querySelector('#app')) {
         body: JSON.stringify({ status: 'rejected' })
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.message || 'Unable to archive inquiry.');
+      if (!response.ok) throw new Error(body.message || 'Unable to reject tenant inquiry.');
       state.bookings = state.bookings.map((b) => b.id === booking.id ? { ...b, status: 'rejected' } : b);
       renderRows();
       renderDetailPanel();
+      closeArchiveConfirmation();
     } catch (error) {
       alert(error.message);
     }
   };
 
-  const openReplyThread = (booking) => {
+  const deleteBooking = (booking) => {
+    if (!booking) return;
+    openInquiryConfirmation(booking, 'delete');
+  };
+
+  const openReplyComposer = (booking) => {
     const activeBooking = focusBooking(booking) || booking;
     if (!activeBooking) return;
 
-    localStorage.setItem('dormhive.activeTenantSelection', JSON.stringify({
-      tenantId: activeBooking.tenant_id,
-      propertyId: activeBooking.property_id,
-      tenantName: activeBooking.tenant_name || 'Tenant',
-      propertyTitle: activeBooking.property_title || 'Property'
-    }));
-
-    location.hash = '#/owner/message';
+    replyRecipient.textContent = activeBooking.tenant_name || 'Tenant';
+    replyMessageInput.value = '';
+    replyModal.hidden = false;
+    document.body.classList.add('reply-modal-open');
+    setTimeout(() => replyMessageInput.focus(), 50);
   };
 
-  const openScheduleModal = (booking) => {
-    const activeBooking = focusBooking(booking) || state.bookings.find((item) => Number(item.id) === Number(booking?.id)) || booking;
-    if (!activeBooking) return;
-
-    schedulingBooking = activeBooking;
-    state.selected = activeBooking;
-    scheduleTenantName.textContent = activeBooking.tenant_name || 'Unknown tenant';
-    schedulePropertyName.textContent = activeBooking.property_title || 'Unknown property';
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    scheduleDate.value = tomorrow.toISOString().split('T')[0];
-    scheduleTime.value = '10:00';
-
-    scheduleModal.hidden = false;
-    document.body.classList.add('schedule-modal-open');
-  };
-  
-  const closeScheduleModal = () => {
-    scheduleModal.hidden = true;
-    schedulingBooking = null;
-    scheduleDate.value = '';
-    scheduleTime.value = '';
-    document.body.classList.remove('schedule-modal-open');
+  const closeReplyComposer = () => {
+    replyModal.hidden = true;
+    replyMessageInput.value = '';
+    document.body.classList.remove('reply-modal-open');
   };
 
-
-
-  const scheduleViewing = async () => {
-    const targetBooking = schedulingBooking || state.selected;
-    if (!targetBooking) return;
-
-    const dateValue = scheduleDate.value.trim();
-    const timeValue = scheduleTime.value.trim();
-
-    if (!dateValue || !timeValue) {
-      alert('Please select both date and time.');
+  const sendReply = async () => {
+    const targetBooking = state.selected || null;
+    const message = replyMessageInput.value.trim();
+    if (!targetBooking || !message) {
+      alert('Please enter a reply message before sending.');
       return;
     }
-
-    const scheduledDateTime = new Date(`${dateValue}T${timeValue}`);
-    const message = `Viewing scheduled for ${scheduledDateTime.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}.`;
 
     try {
       let conversation = getConversationForBooking(targetBooking);
@@ -451,17 +628,18 @@ export function renderInquiries(root = document.querySelector('#app')) {
         body: JSON.stringify({ conversationId: conversation.id, body: message })
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Unable to schedule viewing.');
+      if (!response.ok) throw new Error(result.message || 'Unable to send reply.');
 
-      alert('Viewing scheduled successfully! Tenant has been notified.');
-      closeScheduleModal();
-      renderRows();
+      closeReplyComposer();
+      alert('Reply sent successfully.');
     } catch (error) {
       alert(error.message);
     }
   };
 
   const load = async () => {
+    if (isLoading) return;
+    isLoading = true;
     try {
       const [bookingResponse, propertyResponse, conversationResponse] = await Promise.all([
         fetch(`${API}/bookings`, { headers: auth() }),
@@ -479,23 +657,31 @@ export function renderInquiries(root = document.querySelector('#app')) {
 
       const currentUserId = Number(getCurrentUser().id);
       state.bookings = (Array.isArray(bookingBody.data) ? bookingBody.data : [])
-        .filter((booking) => Number(booking.owner_id) === currentUserId || Number(booking.property_owner_id) === currentUserId)
+        .filter((booking) => (Number(booking.owner_id) === currentUserId || Number(booking.property_owner_id) === currentUserId)
+          && String(booking.status ?? '').toLowerCase() !== 'approved')
         .map((booking) => ({
           ...booking,
           tenant_name: booking.tenant_name || [booking.first_name, booking.last_name].filter(Boolean).join(' ') || 'Unknown tenant',
+          tenant_avatar_url: booking.tenant_avatar_url || booking.avatar_url || booking.tenant_avatar || '',
           property_title: booking.property_title || 'Unknown property'
         }));
-      state.properties = Array.isArray(propertyBody.data) ? propertyBody.data : [];
+      state.properties = (Array.isArray(propertyBody.data) ? propertyBody.data : [])
+        .filter((property) => Number(property.owner_id) === currentUserId || Number(property.ownerId) === currentUserId || Number(property.property_owner_id) === currentUserId);
       state.conversations = Array.isArray(conversationBody.data) ? conversationBody.data : [];
 
       renderPropertyOptions();
       renderRows();
       renderDetailPanel();
-      if (state.bookings[0]) selectBooking(state.bookings[0]);
+      const selectedBooking = state.selected && state.bookings.find((booking) => booking.id === state.selected.id);
+      state.selected = selectedBooking || state.bookings[0] || null;
+      renderRows();
+      renderDetailPanel();
       await updateListingCountsInSidebar();
     } catch (error) {
       const msgArea = root.querySelector('.inquiries-table tbody');
       if (msgArea) msgArea.innerHTML = `<tr><td colspan="6" class="empty-row">Error: ${esc(error.message)}</td></tr>`;
+    } finally {
+      isLoading = false;
     }
   };
 
@@ -525,28 +711,46 @@ export function renderInquiries(root = document.querySelector('#app')) {
     button.addEventListener('click', () => {
       const pageValue = button.dataset.page;
       if (pageValue === 'prev') {
-        if (state.page > 1) {
-          state.page -= 1; renderRows();
-        }
+        changePage(state.page - 1);
       } else if (pageValue === 'next') {
-        const totalPages = Math.max(1, Math.ceil(getVisibleBookings().length / state.pageSize));
-        if (state.page < totalPages) {
-          state.page += 1; renderRows();
-        }
+        changePage(state.page + 1);
       } else {
         const nextPage = Number(pageValue);
         if (Number.isFinite(nextPage) && nextPage >= 1) {
-          state.page = nextPage; renderRows();
+          changePage(nextPage);
         }
       }
     });
   });
 
-  scheduleCloseBtn.addEventListener('click', closeScheduleModal);
-  scheduleCancelBtn.addEventListener('click', closeScheduleModal);
-  scheduleSaveBtn.addEventListener('click', scheduleViewing);
-  
-  scheduleModal.querySelector('.schedule-modal-overlay')?.addEventListener('click', closeScheduleModal);
+  replyCancelBtn.addEventListener('click', closeReplyComposer);
+  replySendBtn.addEventListener('click', sendReply);
+  replyModal.querySelector('.reply-modal-overlay')?.addEventListener('click', closeReplyComposer);
+
+  archiveConfirmCancelBtn.addEventListener('click', closeArchiveConfirmation);
+  archiveConfirmActionBtn.addEventListener('click', () => {
+    if (!pendingArchiveBooking) return;
+    if (archiveConfirmActionBtn.dataset.action === 'delete') {
+      state.bookings = state.bookings.filter((b) => b.id !== pendingArchiveBooking.id);
+      if (state.selected?.id === pendingArchiveBooking.id) {
+        state.selected = state.bookings[0] ?? null;
+      }
+      renderRows();
+      renderDetailPanel();
+      closeArchiveConfirmation();
+      return;
+    }
+    rejectTenantInquiry(pendingArchiveBooking);
+  });
+  archiveConfirmModal.querySelector('.archive-confirm-overlay')?.addEventListener('click', closeArchiveConfirmation);
+
+  successOkBtn?.addEventListener('click', closeSuccessModal);
+  successModal?.querySelector('.success-modal-overlay')?.addEventListener('click', closeSuccessModal);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && successModal && !successModal.hidden) {
+      closeSuccessModal();
+    }
+  });
 
   detailPanel.addEventListener('click', (event) => {
     const actionButton = event.target.closest('.accept-action');
@@ -554,15 +758,11 @@ export function renderInquiries(root = document.querySelector('#app')) {
       acceptTenant();
     }
 
-    const archiveButton = event.target.closest('.archive-panel-action');
-    if (archiveButton && state.selected) {
-      archiveBooking(state.selected);
+    const rejectTenantButton = event.target.closest('.reject-tenant-panel-action');
+    if (rejectTenantButton && state.selected) {
+      openInquiryConfirmation(state.selected);
     }
 
-    const scheduleButton = event.target.closest('.schedule-panel-action');
-    if (scheduleButton && state.selected) {
-      openScheduleModal(state.selected);
-    }
   });
 
   root.querySelector('.logout')?.addEventListener('click', () => {
@@ -571,6 +771,16 @@ export function renderInquiries(root = document.querySelector('#app')) {
   });
 
   load();
+
+  const refreshTimer = window.setInterval(() => {
+    if (!root.isConnected) {
+      window.clearInterval(refreshTimer);
+      return;
+    }
+    load();
+  }, 10000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && root.isConnected) load();
+  });
 }
-
-

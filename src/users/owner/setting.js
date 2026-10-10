@@ -1,4 +1,6 @@
-import { ensureOwnerSidebarStyles, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { ensureOwnerSidebarStyles, loadOwnerStylesheet, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { withMediaAccessToken } from '../../services/mediaAccess.js';
+import { buildInitialsAvatarSvg } from '../../services/avatar.js';
 
 const API = window.DORMHIVE_API_URL ?? 'http://localhost:5000/api/v1';
 const API_BASE = API.replace(/\/api\/v1\/?$/, '');
@@ -15,40 +17,23 @@ function resolveImageUrl(value = '') {
   const url = String(value || '').trim();
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-  if (/^https?:\/\//i.test(url)) return url;
   const normalized = url.replace(/^\.\//, '').replace(/^\/+/, '');
-  return `${API_BASE}/${normalized}`;
+  return withMediaAccessToken(/^https?:\/\//i.test(url) ? url : `${API_BASE}/${normalized}`);
 }
 
 function css() {
-  if (!document.querySelector('[data-owner-style="setting"]')) {
-    const l = document.createElement('link');
-    l.rel = 'stylesheet';
-    l.href = new URL('./style/setting.css', import.meta.url);
-    l.dataset.ownerStyle = 'setting';
-    document.head.append(l);
-  }
+  const stylesheet = new URL('./style/setting.css', import.meta.url);
+  stylesheet.searchParams.set('v', 'mobile-header-inline-4');
+  return loadOwnerStylesheet('setting', stylesheet);
 }
 
-function buildAvatarSvg() {
-  const svg = `
-    <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Alexander J. Reyes portrait">
-      <rect width="240" height="240" rx="120" fill="#f2efe9"/>
-      <circle cx="120" cy="94" r="46" fill="#223547"/>
-      <path d="M67 198c8-37 32-57 53-57s45 20 53 57" fill="#2b4963"/>
-      <path d="M85 106c9-27 24-43 36-43 26 0 40 20 40 44 0 18-7 29-20 37-13 7-29 8-42 2-13-6-20-17-24-40z" fill="#1d2d3c"/>
-      <path d="M75 175c15-14 31-22 45-22 16 0 31 8 45 22" fill="#11212d"/>
-      <rect x="72" y="164" width="96" height="24" rx="12" fill="#0f2b3f"/>
-      <rect x="86" y="171" width="68" height="10" rx="5" fill="#4b6781"/>
-    </svg>`;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+function buildAvatarSvg(name = 'Owner') {
+  return buildInitialsAvatarSvg(name, 'O');
 }
 
 export async function renderSetting(root = document.querySelector('#app')) {
   if (!root) throw new Error('Owner settings page requires #app.');
-  css();
-  ensureOwnerSidebarStyles();
+  await Promise.all([css(), ensureOwnerSidebarStyles()]);
   let user = getUser();
   const displayName = (user.first_name || user.last_name) ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : user.name || 'Alexander J. Reyes';
   const displayEmail = user.email || 'mr.reyes@dormhive.com';
@@ -71,7 +56,7 @@ export async function renderSetting(root = document.querySelector('#app')) {
 
               <div class="avatar-panel">
                 <div class="avatar-wrap" aria-label="User avatar">
-                  <img src="${buildAvatarSvg()}" alt="Portrait of ${displayName}" />
+                  <img src="${resolveImageUrl(user.avatar_url) || buildAvatarSvg(displayName)}" alt="${displayName} avatar" />
                   <button type="button" class="avatar-edit" aria-label="Edit profile photo">✎</button>
                 </div>
                 <div class="user-name">${displayName}</div>
@@ -131,6 +116,10 @@ export async function renderSetting(root = document.querySelector('#app')) {
       </main>
     </div>`;
 
+  const menuButton = root.querySelector('.owner-mobile-menu');
+  const settingsHeader = root.querySelector('.settings-header');
+  if (menuButton && settingsHeader) settingsHeader.prepend(menuButton);
+
   const profileForm = root.querySelector('form[data-form="profile"]');
   const securityForm = root.querySelector('form[data-form="security"]');
   const profileView = root.querySelector('.profile-view');
@@ -179,9 +168,13 @@ export async function renderSetting(root = document.querySelector('#app')) {
       ? (nextValue.startsWith('blob:') || nextValue.startsWith('data:') || /^https?:\/\//i.test(nextValue)
         ? nextValue
         : resolveImageUrl(nextValue))
-      : buildAvatarSvg();
+      : buildAvatarSvg(displayName);
     avatarImage.src = src;
     avatarImage.alt = `Portrait of ${displayName}`;
+    avatarImage.onerror = () => {
+      avatarImage.onerror = null;
+      avatarImage.src = buildAvatarSvg(displayName);
+    };
   }
 
   function restoreProfileSnapshot(snapshot = profileSnapshot) {
@@ -381,5 +374,3 @@ export async function renderSetting(root = document.querySelector('#app')) {
   syncAvatarDisplay(user.avatar_url || '');
   await updateListingCountsInSidebar();
 }
-
-

@@ -3,11 +3,15 @@ export function totalCount(rows = []) {
 }
 
 export function countByRole(rows = [], role) {
-  return Number(rows.find((item) => item?.role === role)?.count || 0);
+  return rows
+    .filter((item) => item?.role === role)
+    .reduce((sum, item) => sum + (Number(item?.count) || 0), 0);
 }
 
 export function countByStatus(rows = [], status) {
-  return Number(rows.find((item) => item?.status === status)?.count || 0);
+  return rows
+    .filter((item) => item?.status === status)
+    .reduce((sum, item) => sum + (Number(item?.count) || 0), 0);
 }
 
 export function buildDashboardMetrics({ users = [], properties = [], bookings = [] }) {
@@ -16,71 +20,60 @@ export function buildDashboardMetrics({ users = [], properties = [], bookings = 
   const totalBookings = totalCount(bookings);
   const pendingModeration = countByStatus(properties, 'pending');
   const approvedBookings = countByStatus(bookings, 'approved');
-
   return {
     totalUsers,
     totalProperties,
     totalBookings,
     pendingModeration,
-    approvalRate: totalBookings ? Math.round((approvedBookings / totalBookings) * 100) : 0,
+    approvalRate: totalBookings ? Math.round((approvedBookings / totalBookings) * 100) : 0
   };
-}
-
-export function formatTimeAgo(timestamp) {
-  if (!timestamp) return 'unknown';
-  const now = new Date();
-  const date = new Date(timestamp);
-  const seconds = Math.floor((now - date) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days > 1 ? 's' : ''} ago`;
 }
 
 export function buildActivityFeed(users = [], properties = [], bookings = []) {
   const activities = [];
-  properties.forEach((prop) => {
-    if (prop.status === 'approved' || prop.status === 'rejected') {
+
+  properties.forEach((property) => {
+    const status = property.status || 'pending';
+    if (['pending', 'approved', 'rejected'].includes(status)) {
       activities.push({
-        icon: prop.status === 'rejected' ? 'alert' : 'shield',
-        title: `Property ${prop.status}`,
-        detail: `[${prop.title || 'Property'}]`,
-        time: formatTimeAgo(prop.updated_at),
-        timestamp: new Date(prop.updated_at || prop.created_at).getTime()
+        title: status === 'pending' ? 'Property submitted' : `Property ${status}`,
+        time: relativeTime(property.updated_at ?? property.created_at),
+        detail: `[${property.title || 'Property'}]`,
+        timestamp: Date.parse(property.updated_at ?? property.created_at ?? new Date().toISOString())
       });
     }
   });
+
   bookings.forEach((booking) => {
-    if (booking.status === 'approved' || booking.status === 'rejected') {
+    if (['approved', 'rejected'].includes(booking.status)) {
       activities.push({
-        icon: booking.status === 'rejected' ? 'alert' : 'user',
         title: `Booking ${booking.status}`,
+        time: relativeTime(booking.updated_at ?? booking.created_at),
         detail: `[${booking.tenant_name || 'Tenant'}]`,
-        time: formatTimeAgo(booking.updated_at),
-        timestamp: new Date(booking.updated_at || booking.created_at).getTime()
+        timestamp: Date.parse(booking.updated_at ?? booking.created_at ?? new Date().toISOString())
       });
     }
   });
+
   users.forEach((user) => {
-    if (user.status === 'active' || user.status === 'suspended') {
-      const createdTimestamp = new Date(user.created_at).getTime();
-      const updatedTimestamp = new Date(user.updated_at || user.created_at).getTime();
-      const hasProfileUpdate = Number.isFinite(updatedTimestamp)
-        && (!Number.isFinite(createdTimestamp) || updatedTimestamp > createdTimestamp + 1000);
-      const activityTimestamp = hasProfileUpdate ? updatedTimestamp : createdTimestamp;
-      activities.push({
-        icon: user.status === 'suspended' ? 'alert' : hasProfileUpdate ? 'sync' : 'user',
-        title: user.status === 'suspended'
-          ? 'User suspended'
-          : hasProfileUpdate ? 'User profile updated' : 'New user registered',
-        detail: `[${user.name || user.email}]`,
-        time: formatTimeAgo(activityTimestamp),
-        timestamp: activityTimestamp
-      });
-    }
+    activities.push({
+      title: user.updated_at && user.updated_at !== user.created_at ? 'User profile updated' : 'New user registered',
+      time: relativeTime(user.updated_at ?? user.created_at),
+      detail: `[${user.name || user.email}]`,
+      timestamp: Date.parse(user.updated_at ?? user.created_at ?? new Date().toISOString()),
+      user
+    });
   });
-  return activities.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
+
+  return activities
+    .sort((first, second) => Number(second.timestamp ?? 0) - Number(first.timestamp ?? 0));
+}
+
+function relativeTime(value) {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60000));
+  if (minutes < 60) return `${minutes} min${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }

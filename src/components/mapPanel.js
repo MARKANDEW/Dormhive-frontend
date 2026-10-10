@@ -172,6 +172,7 @@
     let map;
     try {
       map = L.map(container, { attributionControl: true }).setView([14.5995, 120.9842], 13);
+      map.attributionControl.setPrefix(false);
       // eslint-disable-next-line no-console
       console.log('Leaflet map created successfully');
     } catch (err) {
@@ -212,18 +213,77 @@
     }
 
     const markers = L.layerGroup().addTo(map);
+    const searchMarkerLayer = L.layerGroup().addTo(map);
+    let searchLocation = null;
+    let currentItems = [];
+    let itemsUpdated = false;
+    const distanceInKm = (first, second) => {
+      const radians = (value) => value * Math.PI / 180;
+      const latitudeDelta = radians(second.latitude - first.latitude);
+      const longitudeDelta = radians(second.longitude - first.longitude);
+      const latitude = radians(first.latitude);
+      const otherLatitude = radians(second.latitude);
+      const arc = Math.sin(latitudeDelta / 2) ** 2
+        + Math.sin(longitudeDelta / 2) ** 2 * Math.cos(latitude) * Math.cos(otherLatitude);
+      return 6371 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
+    };
 
     const mgr = {
       map,
       markers,
+      setSearchLocation({ latitude, longitude, label = 'Searched location', zoom, showMarker = true } = {}) {
+        searchLocation = { latitude, longitude };
+        map.closePopup();
+        searchMarkerLayer.clearLayers();
+        if (showMarker) {
+          const marker = L.marker([latitude, longitude], {
+            icon: L.divIcon({
+              className: 'search-location-marker',
+              html: '<span></span>',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })
+          }).addTo(searchMarkerLayer);
+          marker.bindPopup(`<strong>${escapeHtml(label)}</strong>`).openPopup();
+        }
+        this.setItems(currentItems);
+        map.setView([latitude, longitude], Number.isFinite(zoom) ? zoom : Math.max(map.getZoom(), 14));
+      },
+      clearSearchLocation() {
+        searchLocation = null;
+        map.closePopup();
+        searchMarkerLayer.clearLayers();
+        this.setItems(currentItems);
+      },
+      countNearbyItems(radiusInKm = 8) {
+        if (!searchLocation) return 0;
+        return currentItems.filter((item) => {
+          const latitude = Number(item.latitude ?? item.lat ?? NaN);
+          const longitude = Number(item.longitude ?? item.lng ?? NaN);
+          return Number.isFinite(latitude)
+            && Number.isFinite(longitude)
+            && distanceInKm(searchLocation, { latitude, longitude }) <= radiusInKm;
+        }).length;
+      },
       setItems(itemsArray = []) {
+        itemsUpdated = true;
+        currentItems = itemsArray;
         markers.clearLayers();
         const added = [];
         itemsArray.forEach((item) => {
           const lat = Number(item.latitude ?? item.lat ?? NaN);
           const lng = Number(item.longitude ?? item.lng ?? NaN);
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          const marker = L.marker([lat, lng]).addTo(markers);
+          const isNearSearch = searchLocation && distanceInKm(searchLocation, { latitude: lat, longitude: lng }) <= 8;
+          const markerOptions = isNearSearch ? {
+            icon: L.divIcon({
+              className: 'nearby-search-marker',
+              html: '<span></span>',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })
+          } : {};
+          const marker = L.marker([lat, lng], markerOptions).addTo(markers);
           const title = escapeHtml(item.title || item.property_title || item.name || 'Listing');
           const content = `<strong>${title}</strong><br>${money(item.monthly_rent ?? 0)}<br>${escapeHtml(item.municipality || '')}<br><button type="button" class="map-property-details" data-property-id="${escapeHtml(item.id ?? '')}">View Details</button>`;
           marker.bindPopup(content);
@@ -257,7 +317,7 @@
           console.warn('Failed to invalidate map size:', e);
         }
         try {
-          mgr.setItems(items);
+          mgr.setItems(itemsUpdated ? currentItems : items);
           // eslint-disable-next-line no-console
           console.log('Map items set, count:', items.length);
         } catch (e) {

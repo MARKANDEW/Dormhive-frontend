@@ -1,23 +1,68 @@
-﻿import { ensureOwnerSidebarStyles, renderOwnerProfileCard, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+﻿import { showToast } from '../../components/toast.js';
+import { ensureOwnerSidebarStyles, loadOwnerStylesheet, renderOwnerSidebar, updateListingCountsInSidebar } from './sidebarOwner.js';
+import { withMediaAccessToken } from '../../services/mediaAccess.js';
 
 const API = (window.DORMHIVE_API_URL ?? 'http://localhost:5000/api/v1').replace(/\/$/, '');
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('dormhive.accessToken') ?? ''}` });
 const user = () => JSON.parse(localStorage.getItem('dormhive.user') ?? '{}');
 const apiBase = API.replace(/\/api\/v1\/?$/, '');
 const MAX_PROPERTY_PHOTO_SIZE = 2 * 1024 * 1024;
-const SUPPORTED_PROPERTY_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+const SUPPORTED_PROPERTY_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const DEFAULT_IMAGE_PLACEHOLDER = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300"><rect width="500" height="300" fill="#ecf5ef"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#4a7160" font-family="Inter,Arial,sans-serif" font-size="28">No image available</text></svg>');
 const resolveImageUrl = (value = '') => {
   const url = String(value || '').trim();
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+  return withMediaAccessToken(/^https?:\/\//i.test(url) ? url : `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`);
 };
 const normalizePropertyImage = (property) => {
   const source = property.image_url || property.cover_image || (Array.isArray(property.images) && property.images[0]) || '';
   return resolveImageUrl(source);
 };
+const normalizePropertyImages = (property = {}) => {
+  let images = property.images;
+  if (typeof images === 'string') {
+    try { images = JSON.parse(images); } catch { images = []; }
+  }
+  return [...new Set([normalizePropertyImage(property), ...(Array.isArray(images) ? images.map(resolveImageUrl) : [])].filter(Boolean))];
+};
+const normalizePropertyTypeLabel = (value = '') => {
+  const raw = String(value ?? '').trim().toLowerCase();
+  const labelMap = {
+    bedspace: 'Bedspace',
+    private_room: 'Solo Room',
+    'solo room': 'Solo Room',
+    entire_unit: 'Studio Unit',
+    'studio unit': 'Studio Unit'
+  };
+  return labelMap[raw] ?? (raw ? raw.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()) : '');
+};
+const parseNumericValue = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+const getOccupancySummary = (property = {}, bookings = []) => {
+  const totalCapacity = Math.max(0, parseNumericValue(property.max_occupants ?? property.available_slots ?? 0, 0));
+  const occupied = bookings.filter((booking) => {
+    const bookingPropertyId = String(booking.property_id ?? booking.propertyId ?? '');
+    const status = String(booking.status ?? '').toLowerCase();
+    return String(property.id) === bookingPropertyId && status === 'approved';
+  }).reduce((sum, booking) => sum + Math.max(0, parseNumericValue(booking.occupants ?? 1, 1)), 0);
+  const rate = totalCapacity > 0 ? Math.min(100, Math.round((occupied / totalCapacity) * 100)) : 0;
+  const label = totalCapacity > 0 && occupied >= totalCapacity ? 'Fully Occupied' : `${rate}% (${occupied}/${totalCapacity})`;
+  return {
+    total: totalCapacity,
+    occupied,
+    available: Math.max(0, totalCapacity - occupied),
+    rate,
+    label
+  };
+};
+const getPropertyInquiryCount = (propertyId, bookings = []) => bookings.filter((booking) => {
+  const bookingPropertyId = String(booking.property_id ?? booking.propertyId ?? '');
+  const status = String(booking.status ?? '').toLowerCase();
+  return String(propertyId) === bookingPropertyId && !['rejected', 'cancelled', 'archived'].includes(status);
+}).length;
 const escape = (value = '') => { const n = document.createElement('span'); n.textContent = value; return n.innerHTML; };
 const AMENITY_LABELS = {
   wifi: 'Wi-Fi',
@@ -48,46 +93,67 @@ const renderAmenitiesChips = (item = {}) => normalizeAmenities(item)
   .join('');
 const clearSession = () => { localStorage.removeItem('dormhive.accessToken'); localStorage.removeItem('dormhive.user'); };
 
-function css() {
-  if (!document.querySelector('[data-owner-style="listings"]')) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = new URL('./style/myListing.css', import.meta.url);
-    link.dataset.ownerStyle = 'listings';
-    document.head.append(link);
-  }
+function showPropertyPhotoViewer(property) {
+  const photos = normalizePropertyImages(property);
+  if (!photos.length) return;
+  let photoIndex = 0;
+  const viewer = document.createElement('dialog');
+  viewer.className = 'portfolio-photo-viewer';
+  const viewerImage = document.createElement('img');
+  viewerImage.className = 'portfolio-photo-viewer__image';
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'portfolio-photo-viewer__close';
+  closeButton.setAttribute('aria-label', 'Close photo viewer');
+  closeButton.textContent = '×';
+  const previousButton = document.createElement('button');
+  previousButton.type = 'button';
+  previousButton.className = 'portfolio-photo-viewer__nav portfolio-photo-viewer__nav--previous';
+  previousButton.setAttribute('aria-label', 'View previous photo');
+  previousButton.textContent = '‹';
+  const nextButton = document.createElement('button');
+  nextButton.type = 'button';
+  nextButton.className = 'portfolio-photo-viewer__nav portfolio-photo-viewer__nav--next';
+  nextButton.setAttribute('aria-label', 'View next photo');
+  nextButton.textContent = '›';
+  const renderPhoto = () => {
+    viewerImage.src = photos[photoIndex];
+    viewerImage.alt = `${property.title || 'Property'} photo ${photoIndex + 1}`;
+    previousButton.hidden = photos.length < 2;
+    nextButton.hidden = photos.length < 2;
+  };
+  previousButton.addEventListener('click', () => { photoIndex = (photoIndex - 1 + photos.length) % photos.length; renderPhoto(); });
+  nextButton.addEventListener('click', () => { photoIndex = (photoIndex + 1) % photos.length; renderPhoto(); });
+  closeButton.addEventListener('click', () => viewer.close());
+  viewer.addEventListener('click', (event) => { if (event.target === viewer) viewer.close(); });
+  viewer.addEventListener('close', () => viewer.remove(), { once: true });
+  viewer.append(viewerImage, previousButton, nextButton, closeButton);
+  document.body.append(viewer);
+  renderPhoto();
+  viewer.showModal();
 }
 
-export function renderMyListing(root = document.querySelector('#app')) {
-  if (!root) throw new Error('My listings page requires #app.');
-  css();
-  ensureOwnerSidebarStyles();
+function css() {
+  const stylesheet = new URL('./style/myListing.css', import.meta.url);
+  stylesheet.searchParams.set('v', 'mobile-portfolio-fit-2');
+  return loadOwnerStylesheet('listings', stylesheet);
+}
 
-  const account = user();
-  const profileName = account.name || 'Property Owner';
-  const initials = profileName.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || 'PO';
-  const avatarUrl = resolveImageUrl(account.avatar_url || '');
-  const avatarMarkup = avatarUrl ? `<img src="${escape(avatarUrl)}" alt="${escape(profileName)} avatar" />` : `<span>${escape(initials)}</span>`;
+export async function renderMyListing(root = document.querySelector('#app')) {
+  if (!root) throw new Error('My listings page requires #app.');
+  await Promise.all([css(), ensureOwnerSidebarStyles()]);
+  const routeSearch = typeof window.DORMHIVE_ROUTE_SEARCH === 'string' ? window.DORMHIVE_ROUTE_SEARCH : window.location.search;
+  const requestedPropertyId = new URLSearchParams(routeSearch).get('propertyId');
+  const requestedAction = new URLSearchParams(routeSearch).get('action');
 
   root.innerHTML = `
     <div class="owner-shell">
       ${renderOwnerSidebar('myListing')}
       <div class="owner-main">
         <main class="portfolio-page">
-          <header class="portfolio-topbar">
-            <div class="topbar-left"></div>
-            <label class="search-bar" aria-label="Search my listings, inquiries, tenants">
-              <span>⌕</span>
-              <input type="search" placeholder="Search my listings, inquiries, tenants..." />
-            </label>
-            <div class="topbar-right">
-              ${renderOwnerProfileCard()}
-            </div>
-          </header>
-
           <section class="portfolio-content">
             <div class="portfolio-headline">
-              <div>
+              <div class="portfolio-headline-copy">
                 <p class="eyebrow">OWNER PORTFOLIO</p>
                 <h1>My Property Portfolio</h1>
               </div>
@@ -95,18 +161,15 @@ export function renderMyListing(root = document.querySelector('#app')) {
 
             <div class="portfolio-toolbar">
               <label class="property-search">
-                <span>⌕</span>
+                <span aria-hidden="true"><i class="bi bi-search" aria-hidden="true"></i></span>
                 <input type="search" placeholder="Search property" />
               </label>
               <label class="property-filter">
-                <span>Property Type</span>
                 <select>
-                  <option>All Types</option>
-                  <option>Studio</option>
-                  <option>Bed Space</option>
-                  <option>Solo Room</option>
-                  <option>Dormitory</option>
-                  <option>Apartment</option>
+                  <option value="">All Property Type</option>
+                  <option value="bedspace">Bedspace</option>
+                  <option value="private_room">Solo Room</option>
+                  <option value="entire_unit">Studio Unit</option>
                 </select>
               </label>
               <button type="button" class="add-property">Add a New Property</button>
@@ -214,13 +277,13 @@ export function renderMyListing(root = document.querySelector('#app')) {
                       </div>
                     </div>
                     <div class="media-dropzone">
-                      <input id="property-image" name="images" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml" multiple hidden>
+                      <input id="property-image" name="images" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
                       <label for="property-image" class="media-dropzone-label">
                         <span class="dropzone-icon" aria-hidden="true">☁</span>
                         <strong>Drag files to upload</strong>
                         <span class="dropzone-or">or</span>
                         <span class="browse-files">Browse Files</span>
-                        <span class="dropzone-hint">JPG, PNG, GIF, WEBP or SVG up to 2 MB each</span>
+                        <span class="dropzone-hint">JPG, PNG, GIF or WEBP up to 2 MB each</span>
                       </label>
                       <div class="media-upload-status" aria-live="polite">Select as many photos as you need</div>
                     </div>
@@ -245,7 +308,6 @@ export function renderMyListing(root = document.querySelector('#app')) {
                     <tr>
                       <th>Thumbnail</th>
                       <th>Property Name &amp; Address</th>
-                      <th>Type</th>
                       <th>Amenities</th>
                       <th>Current Rent (PHP)</th>
                       <th>Occupancy Rate</th>
@@ -257,14 +319,23 @@ export function renderMyListing(root = document.querySelector('#app')) {
                 </table>
               </div>
 
-              <div class="pagination" aria-label="Portfolio pagination">
-                <button type="button" data-page="prev" aria-label="Previous page">‹</button>
-                <button type="button" data-page="1" class="active">1</button>
-                <button type="button" data-page="2">2</button>
-                <button type="button" data-page="3">3</button>
-                <button type="button" data-page="next" aria-label="Next page">›</button>
-              </div>
             </section>
+
+            <div id="property-action-confirm" class="property-action-confirm" hidden>
+              <div class="property-action-confirm-overlay"></div>
+              <div class="property-action-confirm-card">
+                <div class="property-action-confirm-header">
+                  <h2 id="property-action-confirm-title">Archive Property</h2>
+                </div>
+                <div class="property-action-confirm-body">
+                  <p id="property-action-confirm-text">Are you sure you want to archive this property?</p>
+                </div>
+                <div class="property-action-confirm-footer">
+                  <button type="button" class="secondary-btn property-action-cancel">Cancel</button>
+                  <button type="button" class="primary-btn property-action-confirm-btn">Confirm Archive</button>
+                </div>
+              </div>
+            </div>
           </section>
         </main>
       </div>
@@ -277,6 +348,8 @@ export function renderMyListing(root = document.querySelector('#app')) {
   const propertyFormStep1 = root.querySelector('#property-form-step-1');
   const propertyFormStep2 = root.querySelector('#property-form-step-2');
   const propertyFormStep3 = root.querySelector('#property-form-step-3');
+  const propertySearchInput = root.querySelector('.property-search input');
+  const propertyTypeFilter = root.querySelector('.property-filter select');
   const formStepIndicator = root.querySelector('#form-step-indicator');
   const propertyFormMessage = root.querySelector('#property-form-message');
   const mediaDropzone = root.querySelector('.media-dropzone');
@@ -337,7 +410,7 @@ export function renderMyListing(root = document.querySelector('#app')) {
   const syncInputFiles = () => {
     if (!imageInput || typeof DataTransfer === 'undefined') return;
     const dataTransfer = new DataTransfer();
-    selectedPhotos.forEach(({ file }) => dataTransfer.items.add(file));
+    selectedPhotos.filter((photo) => !photo.existing).forEach(({ file }) => dataTransfer.items.add(file));
     imageInput.files = dataTransfer.files;
   };
 
@@ -352,7 +425,7 @@ export function renderMyListing(root = document.querySelector('#app')) {
         errors.push(`${file.name}: file exceeds the 2 MB limit.`);
         return;
       }
-      if (selectedPhotos.some((item) => item.file.name === file.name && item.file.size === file.size)) return;
+      if (selectedPhotos.some((item) => !item.existing && item.file.name === file.name && item.file.size === file.size)) return;
       const photo = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, previewUrl: URL.createObjectURL(file), progress: 0, error: '', uploading: false, uploadedUrl: '' };
       selectedPhotos.push(photo);
       photo.uploadPromise = uploadPhoto(photo);
@@ -363,7 +436,7 @@ export function renderMyListing(root = document.querySelector('#app')) {
   };
 
   const resetPhotos = () => {
-    selectedPhotos.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
+    selectedPhotos.filter((photo) => !photo.existing).forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
     selectedPhotos = [];
     if (imageInput) imageInput.value = '';
     renderUploadFiles();
@@ -409,7 +482,7 @@ export function renderMyListing(root = document.querySelector('#app')) {
     const button = event.target.closest('.media-file-remove');
     if (!button) return;
     const photo = selectedPhotos.find((item) => item.id === button.dataset.photoId);
-    if (photo) URL.revokeObjectURL(photo.previewUrl);
+    if (photo && !photo.existing) URL.revokeObjectURL(photo.previewUrl);
     selectedPhotos = selectedPhotos.filter((item) => item.id !== button.dataset.photoId);
     syncInputFiles();
     renderUploadFiles();
@@ -673,16 +746,29 @@ export function renderMyListing(root = document.querySelector('#app')) {
 
   // Leaflet map interaction is handled internally by the map library.
 
+  const ITEMS_PER_PAGE = 3;
+
+  const getPagedProperties = (items = []) => {
+    const totalPages = Math.max(1, Math.ceil(items.length / ITEMS_PER_PAGE));
+    activePage = Math.min(Math.max(1, activePage), totalPages);
+    const startIndex = (activePage - 1) * ITEMS_PER_PAGE;
+    return items.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  };
+
   paginationButtons.forEach((button) => {
     button.addEventListener('click', () => {
       const page = button.dataset.page;
       if (page === 'prev') {
         activePage = Math.max(1, activePage - 1);
       } else if (page === 'next') {
-        activePage = Math.min(3, activePage + 1);
+        activePage = Math.min(Math.max(1, Math.ceil(allPropertyRows.length / ITEMS_PER_PAGE)), activePage + 1);
       } else {
         activePage = Number(page);
       }
+
+      const totalPages = Math.max(1, Math.ceil(allPropertyRows.length / ITEMS_PER_PAGE));
+      activePage = Math.min(Math.max(1, activePage), totalPages);
+      renderRows(getPagedProperties(allPropertyRows));
       paginationButtons.forEach((pageButton) => pageButton.classList.toggle('active', String(pageButton.dataset.page) === String(activePage)));
     });
   });
@@ -754,13 +840,15 @@ export function renderMyListing(root = document.querySelector('#app')) {
       
       formData.delete('images');
       formData.delete('image');
-      const uploadResults = await Promise.allSettled(selectedPhotos.map((photo) => photo.uploadPromise));
+      const newPhotos = selectedPhotos.filter((photo) => !photo.existing);
+      const uploadResults = await Promise.allSettled(newPhotos.map((photo) => photo.uploadPromise));
       if (uploadResults.some((result) => result.status === 'rejected' || !result.value?.data?.imageUrl)) {
         setFormMessage('Some photos failed to upload. Retry them individually before closing this form.');
         return;
       }
-      formData.append('imageUrl', selectedPhotos[0]?.uploadedUrl ?? '');
-      formData.append('images', JSON.stringify(selectedPhotos.map((photo) => photo.uploadedUrl)));
+      const photoUrls = selectedPhotos.map((photo) => photo.uploadedUrl).filter(Boolean);
+      formData.append('imageUrl', photoUrls[0] ?? '');
+      formData.append('images', JSON.stringify(photoUrls));
       const finalResponse = await fetch(url, { method, headers: authHeaders(), body: formData });
       let responseBody = {};
       try { responseBody = await finalResponse.json(); } catch {}
@@ -774,6 +862,7 @@ export function renderMyListing(root = document.querySelector('#app')) {
         ? 'Property updated successfully. Changes are now pending admin approval.' 
         : 'Property created successfully. Listing is now pending admin approval.';
       setFormMessage(successMessage, 'success');
+      showToast({ message: successMessage, type: 'success' });
       setTimeout(() => {
         closeModal();
         load();
@@ -790,35 +879,118 @@ export function renderMyListing(root = document.querySelector('#app')) {
   });
 
 
+  let propertyRows = [];
+  let allPropertyRows = [];
+  let allBookingRows = [];
+  let pendingPropertyAction = null;
+
+  const normalizePropertyTypeValue = (value = '') => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw || raw === 'property type') return '';
+    const aliasMap = {
+      'bedspace': 'bedspace',
+      'solo room': 'private_room',
+      'private_room': 'private_room',
+      'private room': 'private_room',
+      'studio unit': 'entire_unit',
+      'entire_unit': 'entire_unit',
+      'entire unit': 'entire_unit'
+    };
+    return aliasMap[raw] ?? raw.replace(/\s+/g, '_');
+  };
+
+  const getFilteredPropertyRows = () => {
+    const searchValue = (propertySearchInput?.value ?? '').trim().toLowerCase();
+    const selectedType = normalizePropertyTypeValue(propertyTypeFilter?.value ?? '');
+
+    return allPropertyRows.filter((item) => {
+      const propertyType = normalizePropertyTypeValue(item.room_type || item.property_type || '');
+      const searchableText = [
+        item.title,
+        item.address,
+        item.municipality,
+        item.barangay,
+        item.room_type,
+        item.property_type,
+        propertyType
+      ].join(' ').toLowerCase();
+
+      const matchesSearch = !searchValue || searchableText.includes(searchValue);
+      const matchesType = !selectedType || propertyType === selectedType;
+      return matchesSearch && matchesType;
+    });
+  };
+
+  const applyPropertyTableState = () => {
+    const filteredRows = getFilteredPropertyRows();
+    const pagedRows = getPagedProperties(filteredRows);
+    renderRows(pagedRows);
+  };
+
+  const propertyActionConfirm = root.querySelector('#property-action-confirm');
+  const propertyActionConfirmTitle = root.querySelector('#property-action-confirm-title');
+  const propertyActionConfirmText = root.querySelector('#property-action-confirm-text');
+  const propertyActionConfirmCancelBtn = root.querySelector('.property-action-cancel');
+  const propertyActionConfirmActionBtn = root.querySelector('.property-action-confirm-btn');
+
+  const closePropertyActionConfirm = () => {
+    pendingPropertyAction = null;
+    propertyActionConfirm.hidden = true;
+  };
+
+  const openPropertyActionConfirm = (property, action) => {
+    pendingPropertyAction = { property, action };
+    const isDelete = action === 'delete';
+    propertyActionConfirmTitle.textContent = isDelete ? 'Delete Property' : 'Archive Property';
+    propertyActionConfirmText.textContent = isDelete
+      ? `Are you sure you want to delete ${property.title || 'this property'}?`
+      : `Are you sure you want to archive ${property.title || 'this property'}?`;
+    propertyActionConfirmActionBtn.textContent = isDelete ? 'Confirm Delete' : 'Confirm Archive';
+    propertyActionConfirmActionBtn.dataset.action = action;
+    propertyActionConfirm.hidden = false;
+  };
+
   const renderRows = (items = []) => {
+    propertyRows = items;
     propertyCache.clear();
     const rows = items.map((item) => {
-      const rate = Math.min(100, Math.max(35, Math.round((Number(item.max_occupants ?? 1) / 4) * 100)));
-      const occupancy = `${rate}% (${Math.min(Number(item.max_occupants ?? 1), 4)}/${Math.max(Number(item.max_occupants ?? 1), 4)})`;
+      const occupancy = getOccupancySummary(item, allBookingRows);
+      const inquiryCount = getPropertyInquiryCount(item.id, allBookingRows);
       const image = normalizePropertyImage(item);
-      // Store property in cache for reliable retrieval
       propertyCache.set(String(item.id), item);
+      const titleText = escape(item.title || 'Untitled Property');
+      const propertyTypeLabel = normalizePropertyTypeLabel(item.room_type || item.property_type || '');
       return `
         <tr>
-          <td>${image ? `<img class="property-thumb" src="${escape(image)}" alt="${escape(item.title || 'Property photo')}" />` : '<div class="thumb-placeholder"></div>'}</td>
+          <td>${image ? `<img class="property-thumb" data-property-id="${escape(String(item.id ?? ''))}" src="${escape(image)}" alt="${escape(item.title || 'Property photo')}" />` : '<div class="thumb-placeholder"></div>'}</td>
           <td>
-            <strong>${escape(item.title || 'Untitled Property')}</strong><br />
-            <small>${escape([item.address, item.municipality, item.barangay].filter(Boolean).join(', ') || 'No address provided')}</small>
+            <strong>${titleText}</strong><br />
+            <small><i class="bi bi-geo-alt-fill property-address-icon" aria-hidden="true"></i> ${escape([item.address, item.municipality, item.barangay].filter(Boolean).join(', ') || 'No address provided')}</small>
           </td>
-          <td>${escape(String(item.room_type || 'Room').replaceAll('_', ' '))}</td>
           <td>${renderAmenitiesChips(item) || '<span class="empty-amenity">None</span>'}</td>
-          <td>₱${Number(item.monthly_rent ?? 0).toLocaleString()}/mo</td>
-          <td>
+          <td data-label="Current Rent (PHP)">₱${Number(item.monthly_rent ?? 0).toLocaleString()}/mo</td>
+          <td data-label="Occupancy Rate">
             <div class="occupancy-cell">
-              <div class="progress-track"><span data-rate="${rate}"></span></div>
-              <small>${escape(occupancy)}</small>
+              <div class="progress-track"><span data-rate="${occupancy.rate}"></span></div>
+              <small>${escape(occupancy.label)}</small>
             </div>
           </td>
-          <td>0 inquiries</td>
+          <td data-label="Active Inquiries"><span class="inquiry-count"><i class="bi bi-chat-dots" aria-hidden="true"></i>${inquiryCount} ${inquiryCount === 1 ? 'inquiry' : 'inquiries'}</span></td>
           <td>
-            <a href="#/owner/inquiries?propertyId=${escape(String(item.id ?? ''))}" class="manage-link" data-property-id="${escape(String(item.id ?? ''))}">Manage</a>
-            <button type="button" class="action-chip edit-property" data-property-id="${escape(String(item.id ?? ''))}">Edit</button>
-            <button type="button" class="action-chip view-property" data-property-id="${escape(String(item.id ?? ''))}">View</button>
+            <div class="property-row-actions">
+              <div class="property-inline-actions">
+                <a href="#/owner/inquiries?propertyId=${escape(String(item.id ?? ''))}" class="manage-link" data-property-id="${escape(String(item.id ?? ''))}">Manage</a>
+              </div>
+              <div class="property-more-wrap">
+                <button type="button" class="property-more-btn" data-property-id="${escape(String(item.id ?? ''))}" aria-label="More property actions">⋯</button>
+                <div class="property-menu" hidden>
+                  <button type="button" class="property-menu-action edit-property" data-property-id="${escape(String(item.id ?? ''))}">Edit</button>
+                  <button type="button" class="property-menu-action view-property" data-property-id="${escape(String(item.id ?? ''))}">View</button>
+                  <button type="button" class="property-menu-action" data-property-id="${escape(String(item.id ?? ''))}" data-action="archive">Archive</button>
+                  <button type="button" class="property-menu-action danger" data-property-id="${escape(String(item.id ?? ''))}" data-action="delete">Delete</button>
+                </div>
+              </div>
+            </div>
           </td>
         </tr>`;
     });
@@ -828,11 +1000,63 @@ export function renderMyListing(root = document.querySelector('#app')) {
     });
   };
 
-  // Event delegation for Edit and View buttons
   portfolioBody.addEventListener('click', (event) => {
+    const propertyThumb = event.target.closest('.property-thumb');
+    if (propertyThumb) {
+      const property = propertyCache.get(propertyThumb.dataset.propertyId);
+      if (property) showPropertyPhotoViewer(property);
+      return;
+    }
+    const menuButton = event.target.closest('.property-more-btn');
+    if (menuButton) {
+      event.stopPropagation();
+      const menu = menuButton.parentElement.querySelector('.property-menu');
+      const shouldOpen = menu.hidden;
+
+      portfolioBody.querySelectorAll('.property-menu').forEach((item) => {
+        if (item !== menu) {
+          item.hidden = true;
+          item.classList.remove('is-upward');
+        }
+      });
+
+      if (shouldOpen) {
+        const rect = menuButton.getBoundingClientRect();
+        menu.hidden = false;
+        const menuHeight = menu.offsetHeight || 170;
+        const menuWidth = menu.offsetWidth || 140;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        const shouldOpenUpward = spaceBelow < menuHeight && spaceAbove > menuHeight;
+        menu.classList.toggle('is-upward', shouldOpenUpward);
+        const top = shouldOpenUpward
+          ? Math.max(8, rect.top - menuHeight - 8)
+          : Math.min(window.innerHeight - menuHeight - 8, rect.bottom + 8);
+        const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth));
+        menu.style.top = `${top}px`;
+        menu.style.left = `${left}px`;
+      } else {
+        menu.hidden = true;
+        menu.classList.remove('is-upward');
+        menu.style.removeProperty('top');
+        menu.style.removeProperty('left');
+      }
+      return;
+    }
+
     const editBtn = event.target.closest('.edit-property');
     const viewBtn = event.target.closest('.view-property');
-    
+    const menuAction = event.target.closest('.property-menu-action');
+
+    if (menuAction && menuAction.dataset.action) {
+      const propertyId = String(menuAction.dataset.propertyId);
+      const property = propertyRows.find((item) => String(item.id) === propertyId);
+      if (property) {
+        openPropertyActionConfirm(property, menuAction.dataset.action);
+      }
+      return;
+    }
+
     if (editBtn) {
       event.preventDefault();
       try {
@@ -848,8 +1072,9 @@ export function renderMyListing(root = document.querySelector('#app')) {
         console.error('Error loading property for edit:', error);
         setFormMessage('Unable to load property for editing.');
       }
+      return;
     }
-    
+
     if (viewBtn) {
       event.preventDefault();
       try {
@@ -868,7 +1093,87 @@ export function renderMyListing(root = document.querySelector('#app')) {
     }
   });
 
+  propertyActionConfirmCancelBtn.addEventListener('click', closePropertyActionConfirm);
+  propertyActionConfirmActionBtn.addEventListener('click', async () => {
+    if (!pendingPropertyAction) return;
+
+    const { property, action } = pendingPropertyAction;
+    const propertyId = String(property.id);
+
+    try {
+      if (action === 'delete') {
+        const response = await fetch(`${API}/properties/${propertyId}`, {
+          method: 'DELETE',
+          headers: authHeaders()
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.message || 'Unable to delete property.');
+        }
+        showToast({ message: 'Property deleted successfully.', type: 'success' });
+      } else if (action === 'archive') {
+        const response = await fetch(`${API}/properties/${propertyId}`, {
+          method: 'PATCH',
+          headers: authHeaders(),
+          body: JSON.stringify({ status: 'archived' })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.message || 'Unable to archive property.');
+        }
+        showToast({ message: 'Property archived successfully.', type: 'success' });
+      }
+
+      closePropertyActionConfirm();
+      await load();
+      await updateListingCountsInSidebar();
+    } catch (error) {
+      console.error('Property action failed:', error);
+      setFormMessage(error.message || 'Unable to complete this action.');
+      closePropertyActionConfirm();
+    }
+  });
+
+  propertySearchInput?.addEventListener('input', () => {
+    activePage = 1;
+    applyPropertyTableState();
+  });
+
+  propertyTypeFilter?.addEventListener('change', () => {
+    activePage = 1;
+    applyPropertyTableState();
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.property-more-btn') && !event.target.closest('.property-menu')) {
+      portfolioBody.querySelectorAll('.property-menu').forEach((menu) => {
+        menu.hidden = true;
+      });
+    }
+  });
+
   const loadPropertyForEdit = (propertyData) => {
+    resetPhotos();
+    let existingImages = propertyData.images;
+    if (typeof existingImages === 'string') {
+      try { existingImages = JSON.parse(existingImages); } catch { existingImages = []; }
+    }
+    const existingPhotoUrls = [...new Set([
+      propertyData.image_url,
+      ...(Array.isArray(existingImages) ? existingImages : [])
+    ].filter((image) => typeof image === 'string' && image.trim()))];
+    selectedPhotos = existingPhotoUrls.map((url, index) => ({
+      id: `existing-${propertyData.id}-${index}`,
+      file: { name: url.split('/').pop() || 'Property photo', size: 0 },
+      previewUrl: resolveImageUrl(url),
+      uploadedUrl: url,
+      progress: 100,
+      error: '',
+      uploading: false,
+      existing: true
+    }));
+    renderUploadFiles();
+
     // Populate the form with existing property data
     const form = propertyForm;
     form.elements.title.value = propertyData.title || '';
@@ -904,48 +1209,53 @@ export function renderMyListing(root = document.querySelector('#app')) {
   };
 
   const showPropertyDetails = (propertyData) => {
+    const galleryImages = normalizePropertyImages(propertyData);
+    const photos = galleryImages.length ? galleryImages : [DEFAULT_IMAGE_PLACEHOLDER];
+    const owner = user();
+    const ownerName = propertyData.owner_name
+      || propertyData.owner?.name
+      || [propertyData.owner?.first_name, propertyData.owner?.last_name].filter(Boolean).join(' ')
+      || [owner.first_name, owner.last_name].filter(Boolean).join(' ')
+      || owner.name
+      || 'N/A';
     const detailsModal = document.createElement('div');
     detailsModal.className = 'property-details-modal';
     detailsModal.innerHTML = `
       <div class="property-details-card">
         <div class="property-details-header">
-          <h2>${escape(propertyData.title || 'Property Details')}</h2>
-          <button type="button" class="modal-close">×</button>
+          <h2><span class="property-details-header-icon"><i class="bi bi-house-door-fill" aria-hidden="true"></i></span>Property Details</h2>
+          <button type="button" class="modal-close" aria-label="Close property details">×</button>
         </div>
         <div class="property-details-content">
-          <div class="details-section">
-            <label>Address</label>
-            <p>${escape([propertyData.address, propertyData.barangay, propertyData.municipality].filter(Boolean).join(', ') || 'No address')}</p>
-          </div>
-          <div class="details-section">
-            <label>Property Type</label>
-            <p>${escape(String(propertyData.room_type || 'N/A').replaceAll('_', ' '))}</p>
-          </div>
-          <div class="details-section">
-            <label>Monthly Rent</label>
-            <p>₱${Number(propertyData.monthly_rent ?? 0).toLocaleString()}</p>
-          </div>
-          <div class="details-section">
-            <label>Max Occupants</label>
-            <p>${propertyData.max_occupants || 'N/A'}</p>
-          </div>
-          <div class="details-section">
-            <label>Available Slots</label>
-            <p>${propertyData.available_slots || 'N/A'}</p>
-          </div>
-          <div class="details-section">
-            <label>Gender Preference</label>
-            <p>${escape(String(propertyData.gender_preference || 'Any').replaceAll('_', ' '))}</p>
-          </div>
-          <div class="details-section">
-            <label>Amenities</label>
-            <div class="amenities-list">
-              ${renderAmenitiesChips(propertyData) || '<span>None</span>'}
+          <div class="property-details-gallery" aria-label="Property photos">
+            <div class="property-details-gallery-stage">
+              <img class="property-details-main-image" src="${escape(photos[0])}" alt="${escape(propertyData.title || 'Property')} photo 1">
+              <span class="property-details-image-counter" aria-live="polite">1 / ${photos.length}</span>
+              <button type="button" class="property-details-gallery-nav previous" aria-label="Previous photo">&#8249;</button>
+              <button type="button" class="property-details-gallery-nav next" aria-label="Next photo">&#8250;</button>
             </div>
+            <div class="property-details-thumbnails" role="group" aria-label="Property photo thumbnails">
+              ${photos.map((image, index) => `<button type="button" class="property-details-thumbnail${index === 0 ? ' active' : ''}" data-gallery-index="${index}" aria-label="View photo ${index + 1}" aria-current="${index === 0 ? 'true' : 'false'}"><img src="${escape(image)}" alt=""></button>`).join('')}
           </div>
-          <div class="details-section">
-            <label>Description</label>
-            <p>${escape(propertyData.description || 'No description provided')}</p>
+          </div>
+          <div class="property-details-information">
+            <div class="property-details-heading">
+              <h3>${escape(propertyData.title || 'Property')}</h3>
+              <strong>PHP ${Number(propertyData.monthly_rent ?? 0).toLocaleString('en-PH')} / month</strong>
+            </div>
+            <div class="property-details-facts">
+              <div class="details-section"><span class="details-label"><i class="bi bi-geo-alt-fill" aria-hidden="true"></i>Location</span><p>${escape([propertyData.address, propertyData.barangay, propertyData.municipality].filter(Boolean).join(', ') || 'No address')}</p></div>
+              <div class="details-section"><span class="details-label"><i class="bi bi-house-fill" aria-hidden="true"></i>Room Type</span><p>${escape(normalizePropertyTypeLabel(propertyData.room_type || propertyData.property_type || 'N/A')) || 'N/A'}</p></div>
+              <div class="details-section"><span class="details-label"><i class="bi bi-people-fill" aria-hidden="true"></i>Occupancy</span><p>${propertyData.max_occupants != null ? `Up to ${escape(propertyData.max_occupants)} tenants` : 'N/A'}</p></div>
+              <div class="details-section"><span class="details-label"><i class="bi bi-door-open-fill" aria-hidden="true"></i>Available Slots</span><p>${propertyData.available_slots ?? 'N/A'}</p></div>
+              <div class="details-section"><span class="details-label"><i class="bi bi-gender-ambiguous" aria-hidden="true"></i>Gender Preference</span><p>${escape(String(propertyData.gender_preference || 'Any').replaceAll('_', ' '))}</p></div>
+              <div class="details-section"><span class="details-label"><i class="bi bi-person-fill" aria-hidden="true"></i>Owner</span><p>${escape(ownerName)}</p></div>
+              <div class="details-section details-amenities"><span class="details-label"><i class="bi bi-stars" aria-hidden="true"></i>Amenities</span><div class="amenities-list">${renderAmenitiesChips(propertyData) || '<span>None</span>'}</div></div>
+            </div>
+            <div class="details-section property-details-description">
+              <span class="details-label"><i class="bi bi-card-text" aria-hidden="true"></i>Description</span>
+              <p>${escape(propertyData.description || 'No description provided')}</p>
+            </div>
           </div>
         </div>
         <div class="property-details-actions">
@@ -959,6 +1269,26 @@ export function renderMyListing(root = document.querySelector('#app')) {
     // Handle close button
     detailsModal.querySelector('.modal-close').addEventListener('click', () => detailsModal.remove());
     detailsModal.querySelector('.close-details').addEventListener('click', () => detailsModal.remove());
+
+    const mainImage = detailsModal.querySelector('.property-details-main-image');
+    const counter = detailsModal.querySelector('.property-details-image-counter');
+    const thumbnails = Array.from(detailsModal.querySelectorAll('.property-details-thumbnail'));
+    let photoIndex = 0;
+    const showPhoto = (nextIndex) => {
+      photoIndex = (nextIndex + photos.length) % photos.length;
+      mainImage.src = photos[photoIndex];
+      mainImage.alt = `${propertyData.title || 'Property'} photo ${photoIndex + 1}`;
+      counter.textContent = `${photoIndex + 1} / ${photos.length}`;
+      thumbnails.forEach((thumbnail, index) => {
+        const active = index === photoIndex;
+        thumbnail.classList.toggle('active', active);
+        thumbnail.setAttribute('aria-current', String(active));
+      });
+    };
+    detailsModal.querySelector('.property-details-gallery-nav.previous').addEventListener('click', () => showPhoto(photoIndex - 1));
+    detailsModal.querySelector('.property-details-gallery-nav.next').addEventListener('click', () => showPhoto(photoIndex + 1));
+    thumbnails.forEach((thumbnail) => thumbnail.addEventListener('click', () => showPhoto(Number(thumbnail.dataset.galleryIndex))));
+    mainImage.addEventListener('click', () => showPropertyPhotoViewer(propertyData));
     
     // Close on backdrop click
     detailsModal.addEventListener('click', (event) => {
@@ -968,19 +1298,52 @@ export function renderMyListing(root = document.querySelector('#app')) {
 
   const load = async () => {
     try {
-      const response = await fetch(`${API}/properties?limit=100`, { headers: authHeaders() });
-      const body = await response.json();
-      if (!response.ok) {
-        if (response.status === 401) {
+      let propertiesResponse;
+      let bookingsResponse;
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        propertiesResponse = await fetch(`${API}/properties?limit=100`, { headers: authHeaders() });
+        if (propertiesResponse.status !== 429 || attempt === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        bookingsResponse = await fetch(`${API}/bookings`, { headers: authHeaders() });
+        if (bookingsResponse.status !== 429 || attempt === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+
+      const propertiesBody = await propertiesResponse.json();
+      const bookingsBody = await bookingsResponse.json();
+
+      if (!propertiesResponse.ok) {
+        if (propertiesResponse.status === 401) {
           clearSession();
           portfolioBody.innerHTML = '<tr><td colspan="7" class="empty-row">Your session has expired. Please sign in again.</td></tr>';
           setTimeout(() => location.assign('#/login'), 800);
           return;
         }
-        throw new Error(body.message ?? 'Unable to load listings.');
+        throw new Error(propertiesBody.message ?? 'Unable to load listings.');
       }
-      const items = (body.data ?? []).filter((item) => Number(item.owner_id) === Number(account.id));
-      renderRows(items);
+
+      if (!bookingsResponse.ok) {
+        if (bookingsResponse.status === 401) {
+          clearSession();
+          portfolioBody.innerHTML = '<tr><td colspan="7" class="empty-row">Your session has expired. Please sign in again.</td></tr>';
+          setTimeout(() => location.assign('#/login'), 800);
+          return;
+        }
+        throw new Error(bookingsBody.message ?? 'Unable to load inquiries.');
+      }
+
+      const items = (propertiesBody.data ?? []).filter((item) => Number(item.owner_id) === Number(user().id));
+      allPropertyRows = items;
+      allBookingRows = Array.isArray(bookingsBody.data) ? bookingsBody.data : [];
+      applyPropertyTableState();
+      if (requestedPropertyId && requestedAction === 'edit') {
+        const requestedProperty = allPropertyRows.find((item) => String(item.id) === String(requestedPropertyId));
+        if (requestedProperty) loadPropertyForEdit(requestedProperty);
+      }
       await updateListingCountsInSidebar();
     } catch (error) {
       portfolioBody.innerHTML = `<tr><td colspan="7" class="empty-row">${escape(error.message)}</td></tr>`;
