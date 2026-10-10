@@ -1183,16 +1183,31 @@ a {
 
 @media (max-width: 700px) {
   .owner-dashboard {
+<<<<<<< HEAD
     padding: 1rem;
   }
 
   .dashboard-tools {
     position: static;
+=======
+    padding: calc(62px + 1rem) 1rem 1rem;
+  }
+
+  .dashboard-tools {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 15;
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     display: flex;
     align-items: center;
     justify-content: space-between;
     width: 100%;
+<<<<<<< HEAD
     min-height: 62px;
+=======
+    height: 62px;
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     padding: 0 12px 0 16px;
     gap: 0.5rem;
     background: #159879;
@@ -1427,7 +1442,11 @@ a {
 
 @media (max-width: 480px) {
   .owner-dashboard {
+<<<<<<< HEAD
     padding: 0.75rem;
+=======
+    padding: calc(62px + 0.75rem) 0.75rem 0.75rem;
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
   }
 
   .dashboard-tools .topbar-right {

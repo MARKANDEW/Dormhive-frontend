@@ -388,11 +388,15 @@
   }
 
   .users-header {
+<<<<<<< HEAD
     position: relative;
+=======
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     display: block;
   }
 
   .users-header-meta {
+<<<<<<< HEAD
     position: absolute;
     top: 0;
     right: 0;
@@ -426,6 +430,10 @@
     color: var(--users-ink);
     font-size: 1.4rem;
     line-height: 1;
+=======
+    justify-items: start;
+    margin-top: 18px;
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
   }
 }
 
@@ -443,6 +451,7 @@
     font-size: 2rem;
   }
 }
+<<<<<<< HEAD
 
 @media (max-width: 720px) {
   .users-card {
@@ -560,3 +569,5 @@
     text-align: center !important;
   }
 }
+=======
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd

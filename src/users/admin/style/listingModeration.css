@@ -241,7 +241,10 @@
 .photo-grid .thumb.has-more { position: relative; overflow: hidden; }
 .photo-grid .thumb.has-more::after { content: ''; position: absolute; inset: 0; background: rgb(23 52 79 / 42%); }
 .photo-grid .thumb.has-more span { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; color: #fff; font-size: 18px; font-weight: 850; }
+<<<<<<< HEAD
 .mobile-gallery-more { display: none !important; }
+=======
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
 .photo-grid .thumb:last-child { background: #d9f8f1; }
 .detail-body { padding: 2px 20px 20px; }
 .detail-body h2 { margin: 14px 0 7px; color: var(--mod-ink); font-size: 22px; }
@@ -286,6 +289,7 @@
   .moderation-table th, .moderation-table td { padding-inline: 7px; }
 }
 @media (max-width: 860px) {
+<<<<<<< HEAD
   .moderation-page { padding: 18px 18px 36px; }
   .moderation-header { position: relative; display: block; margin-bottom: 20px; }
   .moderation-header > div:first-child { min-width: 0; }
@@ -511,4 +515,18 @@
   .moderation-page { padding: 14px 14px 28px; }
   .moderation-tabs { gap: 0; }
   .moderation-tab { min-height: 44px; padding: 7px 3px; font-size: 9px; }
+=======
+  .moderation-header { display: block; }
+  .moderation-header-meta { justify-items: start; margin-top: 18px; }
+  .moderation-layout { grid-template-columns: 1fr; }
+  .detail-panel { position: static; }
+  .table-shell { overflow-x: auto; }
+  .moderation-table { min-width: 760px; }
+}
+@media (max-width: 560px) {
+  .moderation-page { padding: 22px 16px 32px; }
+  .toolbar { grid-template-columns: 1fr; }
+  .moderation-tabs { grid-template-columns: 1fr; }
+  .moderation-header h1 { font-size: 2rem; }
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
 }

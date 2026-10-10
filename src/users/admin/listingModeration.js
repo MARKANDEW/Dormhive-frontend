@@ -8,9 +8,13 @@ const headers = () => ({ 'Content-Type': 'application/json', Authorization: `Bea
 const esc = (value = '') => { const e = document.createElement('span'); e.textContent = value; return e.innerHTML; };
 
 function css() {
+<<<<<<< HEAD
   const stylesheet = new URL('./style/listingModeration.css', import.meta.url);
   stylesheet.searchParams.set('v', 'moderation-approved-status-badge-6');
   return loadAdminStylesheet('moderation', stylesheet);
+=======
+  return loadAdminStylesheet('moderation', new URL('./style/listingModeration.css', import.meta.url));
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
 }
 
 export async function renderListingModeration(root = document.querySelector('#app')) {
@@ -28,7 +32,11 @@ export async function renderListingModeration(root = document.querySelector('#ap
         <main class="moderation-page">
           <header class="moderation-header">
             <div>
+<<<<<<< HEAD
               <div class="moderation-kicker-row"><div class="moderation-kicker">Moderation</div></div>
+=======
+              <div class="moderation-kicker">Moderation</div>
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
               <h1>Listing Moderation: ${initialLabel}</h1>
               <p>Manage and review property listings submitted by users.</p>
             </div>
@@ -319,9 +327,12 @@ export async function renderListingModeration(root = document.querySelector('#ap
       const showCount = index === visibleImages.length - 1 && remainingCount > 0;
       return `<div class="thumb${showCount ? ' has-more' : ''}" style="background-image:url('${esc(imageUrl)}');background-position:center;background-size:cover;background-repeat:no-repeat">${showCount ? `<span>+${remainingCount}</span>` : ''}</div>`;
     });
+<<<<<<< HEAD
     if (imageUrls.length > 3) {
       photoTiles.splice(3, 0, `<div class="thumb has-more mobile-gallery-more" style="background-image:url('${esc(imageUrls[3])}');background-position:center;background-size:cover;background-repeat:no-repeat"><span>+${imageUrls.length - 3}</span></div>`);
     }
+=======
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     detailPhotos.innerHTML = photoTiles.length ? photoTiles.join('') : '<div class="thumb"></div>';
     updateDetailActions();
   };
@@ -344,6 +355,7 @@ export async function renderListingModeration(root = document.querySelector('#ap
 
     tableShell.classList.toggle('is-empty', visibleRows.length === 0);
     tbody.innerHTML = visibleRows.map((row) => `
+<<<<<<< HEAD
       <tr class="listing-summary-row${selected?.id === row.id ? ' selected' : ''}" data-id="${row.id}">
         <td data-label="Thumbnail"><div class="thumbnail" ${getThumbStyles(row)}></div></td>
         <td data-label="Property" data-privacy-mask="detail">${esc(row.title || 'Untitled property')}</td>
@@ -351,6 +363,15 @@ export async function renderListingModeration(root = document.querySelector('#ap
         <td data-label="Type" data-privacy-mask="detail">${esc(String(row.room_type || 'Unknown').replaceAll('_', ' '))}</td>
         <td data-label="Rent" data-privacy-mask="stat">${esc(formatCurrency(row.monthly_rent))}</td>
         <td data-label="Submitted">${esc(formatDate(row.created_at))}</td>
+=======
+      <tr class="${selected?.id === row.id ? 'selected' : ''}" data-id="${row.id}">
+        <td><div class="thumbnail" ${getThumbStyles(row)}></div></td>
+        <td data-privacy-mask="detail">${esc(row.title || 'Untitled property')}</td>
+        <td data-privacy-mask="name">${esc(row.owner_name || 'Unknown owner')}</td>
+        <td data-privacy-mask="detail">${esc(String(row.room_type || 'Unknown').replaceAll('_', ' '))}</td>
+        <td data-privacy-mask="stat">${esc(formatCurrency(row.monthly_rent))}</td>
+        <td>${esc(formatDate(row.created_at))}</td>
+>>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
         <td class="action-icons"><button type="button" aria-label="View details">🔎</button></td>
       </tr>`).join('') || '<tr><td colspan="7" class="empty-row">No matching listings found.</td></tr>';
 
