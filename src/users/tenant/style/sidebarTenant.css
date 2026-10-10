@@ -321,11 +321,7 @@
   }
 
   .tenant-mobile-menu {
-<<<<<<< HEAD
     position: absolute;
-=======
-    position: fixed;
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     top: 0.85rem;
     right: 0.85rem;
     left: auto;

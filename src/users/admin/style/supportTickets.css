@@ -627,7 +627,6 @@ body {
 @media (max-width: 700px) {
   .support-header {
     flex-direction: column;
-<<<<<<< HEAD
     gap: 8px;
     padding: 12px 0 10px;
   }
@@ -667,33 +666,6 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     margin-bottom: 10px;
-=======
-  }
-  .create-ticket {
-    align-self: flex-start;
-  }
-  .support-summary {
-    grid-template-columns: 1fr;
-  }
-  .support-filter-bar {
-    grid-template-columns: 1fr;
-  }
-  .support-tabs {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .support-workspace {
-    grid-template-columns: 1fr;
-  }
-  .ticket-table-card {
-    overflow-x: auto;
-  }
-  .ticket-details {
-    max-height: none;
-  }
-  .ticket-table-head,
-  .ticket-row {
-    min-width: 760px;
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
   }
   .support-summary-card {
     align-items: center;

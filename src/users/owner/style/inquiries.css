@@ -991,11 +991,7 @@ textarea {
   }
 
   .owner-shell > .owner-mobile-menu {
-<<<<<<< HEAD
     position: absolute !important;
-=======
-    position: fixed !important;
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     top: max(40px, calc(env(safe-area-inset-top) + 24px));
     right: auto;
     left: 14px;

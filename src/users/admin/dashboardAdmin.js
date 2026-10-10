@@ -17,26 +17,6 @@ const esc = (v = '') => {
   e.textContent = v;
   return e.innerHTML;
 };
-<<<<<<< HEAD
-=======
-
-const demoUsers = [
-  { id: 1, name: 'Miguel cruz', email: 'tenant@tenant2.com', role: 'tenant', status: 'active', avatar_url: '' },
-  { id: 2, name: 'robin wall', email: 'tenant@tenant.com', role: 'tenant', status: 'active', avatar_url: '' },
-  { id: 3, name: 'Jose cayetano', email: 'owner@owner.com', role: 'owner', status: 'active', avatar_url: '' },
-  { id: 4, name: 'juan luna', email: 'admin@admin.com', role: 'admin', status: 'active', avatar_url: '' }
-];
-
-const demoActivity = [
-  { icon: 'user', title: 'User profile updated', detail: '[Miguel cruz]', time: '2 mins ago' },
-  { icon: 'user', title: 'User profile updated', detail: '[juan luna]', time: '1 day ago' },
-  { icon: 'alert', title: 'Property rejected', detail: '[432432]', time: '1 day ago' },
-  { icon: 'sync', title: 'Property approved', detail: '[10]', time: '1 day ago' },
-  { icon: 'sync', title: 'Property approved', detail: '[hotels]', time: '2 days ago' },
-  { icon: 'user', title: 'User profile updated', detail: '[robin wall]', time: '5 days ago' },
-  { icon: 'user', title: 'User profile updated', detail: '[Jose cayetano]', time: '5 days ago' }
-];
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
 
 function formatDate(value) {
   if (!value) return '—';
@@ -46,13 +26,9 @@ function formatDate(value) {
 }
 
 function css() {
-<<<<<<< HEAD
   const stylesheet = new URL('./style/dashboardAdmin.css', import.meta.url);
   stylesheet.searchParams.set('v', 'mobile-stat-cards-two-columns-12');
   return loadAdminStylesheet('dashboard', stylesheet);
-=======
-  return loadAdminStylesheet('dashboard', new URL('./style/dashboardAdmin.css', import.meta.url));
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
 }
 
 function resetDashboardState(root) {
@@ -271,15 +247,10 @@ async function refreshDashboardData(root) {
     root.querySelector('[data-metric="pending"]').textContent = metrics.pendingModeration;
     root.querySelector('[data-metric="bookings"]').textContent = metrics.totalBookings;
 
-<<<<<<< HEAD
     const userData = Array.isArray(users.data) ? users.data.slice(0, 4) : [];
     root.querySelector('.user-grid').innerHTML = userData.length
       ? userData.map(renderUserCard).join('')
       : '<p class="dashboard-empty-state">No users found.</p>';
-=======
-    const userData = Array.isArray(users.data) && users.data.length ? users.data.slice(0, 4) : demoUsers;
-    root.querySelector('.user-grid').innerHTML = userData.map(renderUserCard).join('');
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     bindUserActions(root, userData);
 
     const liveActivity = buildActivityFeed(
@@ -298,18 +269,8 @@ async function refreshDashboardData(root) {
       return;
     }
 
-<<<<<<< HEAD
     root.querySelector('.user-grid').innerHTML = `<p class="dashboard-empty-state">${esc(error.message || 'Unable to load users.')}</p>`;
     root.querySelector('.activity-list').innerHTML = `<div class="activity-row"><div class="activity-main"><span class="activity-text">${esc(error.message || 'Unable to load recent activity.')}</span></div></div>`;
-=======
-    root.querySelector('[data-metric="users"]').textContent = '4';
-    root.querySelector('[data-metric="listings"]').textContent = '5';
-    root.querySelector('[data-metric="pending"]').textContent = '2';
-    root.querySelector('[data-metric="bookings"]').textContent = '0';
-    root.querySelector('.user-grid').innerHTML = demoUsers.map(renderUserCard).join('');
-    bindUserActions(root, demoUsers);
-    root.querySelector('.activity-list').innerHTML = demoActivity.map(renderActivityItem).join('');
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
     showToast({ message: error.message || 'Unable to load admin dashboard data.', type: 'error' });
   }
 }
@@ -342,11 +303,7 @@ export async function renderDashboardAdmin(root = document.querySelector('#app')
               </div>
               <div class="stat-body">
                 <span class="stat-label">Registered Users</span>
-<<<<<<< HEAD
                 <strong data-metric="users">0</strong>
-=======
-                <strong data-metric="users">4</strong>
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
                 <small>Total platform accounts</small>
               </div>
             </article>
@@ -357,11 +314,7 @@ export async function renderDashboardAdmin(root = document.querySelector('#app')
               </div>
               <div class="stat-body">
                 <span class="stat-label">Published Listings</span>
-<<<<<<< HEAD
                 <strong data-metric="listings">0</strong>
-=======
-                <strong data-metric="listings">5</strong>
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
                 <small>Active property listings</small>
               </div>
             </article>
@@ -372,11 +325,7 @@ export async function renderDashboardAdmin(root = document.querySelector('#app')
               </div>
               <div class="stat-body">
                 <span class="stat-label">Pending Moderation</span>
-<<<<<<< HEAD
                 <strong data-metric="pending">0</strong>
-=======
-                <strong data-metric="pending">2</strong>
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
                 <small>Awaiting review</small>
               </div>
             </article>
@@ -424,7 +373,6 @@ export async function renderDashboardAdmin(root = document.querySelector('#app')
     </div>
   `;
 
-<<<<<<< HEAD
   const mobileMenu = root.querySelector('.admin-mobile-menu');
   const overviewPill = root.querySelector('.overview-pill');
   const overviewTitle = root.querySelector('.overview-title-wrap h1');
@@ -435,8 +383,6 @@ export async function renderDashboardAdmin(root = document.querySelector('#app')
     overviewKicker.append(mobileMenu, overviewPill);
   }
 
-=======
->>>>>>> 7714126ace0db44f93ee50d54dc67d696751f6cd
   root.querySelector('.users-panel .panel-button')?.addEventListener('click', () => {
     window.location.hash = '#/admin/userManagement';
   });
